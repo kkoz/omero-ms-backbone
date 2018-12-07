@@ -1,0 +1,73 @@
+plugins {
+    id 'eclipse'
+    id 'java'
+    id 'maven'
+    id 'application'
+}
+
+group = 'com.glencoesoftware.omero'
+version = '0.3.2'
+
+mainClassName = 'io.vertx.core.Starter'
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+    maven {
+        name 'Unidata'
+        url 'https://artifacts.unidata.ucar.edu/content/repositories/unidata-releases'
+    }
+    maven {
+        url 'http://artifacts.openmicroscopy.org/artifactory/maven/'
+    }
+}
+
+configurations.all {
+    resolutionStrategy.cacheChangingModulesFor 0, 'minutes'
+    exclude group: 'hsqldb'  // Version required by OMERO is missing from upstream repositories
+}
+
+dependencies {
+    compile 'ch.qos.logback:logback-classic:1.1.1'
+    compile 'io.vertx:vertx-web:3.5.3'
+    compile 'io.vertx:vertx-hazelcast:3.5.3'
+    compileOnly('omero:blitz:5.4.7-ice36-b93') {
+        exclude group: 'org.testng', module: 'testng'
+    }
+    compile 'org.perf4j:perf4j:0.9.16'
+
+    testCompile 'org.testng:testng:6.10'
+}
+
+jar {
+    manifest {
+        attributes(
+            "Main-Class": mainClassName,
+            "Main-Verticle": "com.glencoesoftware.omero.ms.backbone.QueryVerticle"
+        )
+    }
+}
+
+test {
+  // enable TestNG support (default is JUnit)
+  useTestNG()
+}
+
+uploadArchives {
+    repositories {
+        mavenDeployer {
+            repository(url: 'https://artifacts.glencoesoftware.com/artifactory/gs-omero-snapshots-local') {
+                authentication(
+                    userName: project.properties.ArtifactoryUserName,
+                    password: project.properties.ArtifactoryPassword
+                )
+            }
+        }
+    }
+}
+
+applicationDefaultJvmArgs = [
+  "-Dvertx.logger-delegate-factory-class-name=io.vertx.core.logging.SLF4JLogDelegateFactory"
+]
