@@ -27,6 +27,7 @@ repositories {
 configurations.all {
     resolutionStrategy.cacheChangingModulesFor 0, 'minutes'
     exclude group: 'hsqldb'  // Version required by OMERO is missing from upstream repositories
+    exclude group: 'xerces'  // Does not play nicely with Hazelcast
 }
 
 dependencies {
