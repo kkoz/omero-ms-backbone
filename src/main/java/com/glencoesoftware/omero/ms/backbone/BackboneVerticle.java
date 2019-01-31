@@ -18,6 +18,9 @@
 
 package com.glencoesoftware.omero.ms.backbone;
 
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectOutputStream;
+
 import org.hibernate.Session;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
@@ -28,6 +31,8 @@ import io.vertx.core.Future;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
 import ome.api.IQuery;
+import ome.model.IObject;
+import ome.model.internal.Details;
 import ome.services.sessions.SessionManager;
 import ome.services.util.Executor;
 import ome.system.Principal;
@@ -54,6 +59,9 @@ public class BackboneVerticle extends AbstractVerticle {
     private final Executor executor;
 
     private final SessionManager sessionManager;
+
+    private final DetailsContextsFilter contextsFilter =
+            new DetailsContextsFilter();
 
     BackboneVerticle(Executor executor, SessionManager sessionManager) {
         this.executor = executor;
@@ -88,13 +96,13 @@ public class BackboneVerticle extends AbstractVerticle {
                     session.getUuid(),
                     "-1",
                     session.getDefaultEventType());
-            Object o = executor.execute(
+            IObject o = (IObject) executor.execute(
                     principal, new Executor.SimpleWork(this, "test") {
                 @Transactional(readOnly = true)
-                public Object doWork(Session session, ServiceFactory sf) {
+                public IObject doWork(Session session, ServiceFactory sf) {
                     IQuery iQuery = sf.getQueryService();
                     try {
-                        Class<? extends ome.model.IObject> klass =
+                        Class<? extends IObject> klass =
                                 IceMapper.omeroClass(
                                         data.getString("type"), true);
                         return iQuery.get(klass, data.getLong("id"));
@@ -104,8 +112,15 @@ public class BackboneVerticle extends AbstractVerticle {
                     return null;
                 }
             });
-            message.reply("" + o);
+            // May contain non-serializable objects
+            contextsFilter.filter("", o);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
+                oos.writeObject(o);
+            }
+            message.reply(baos.toByteArray());
         } catch (Exception e) {
+            log.error("Failure encoding", e);
             message.fail(500, e.getMessage());
         }
     }

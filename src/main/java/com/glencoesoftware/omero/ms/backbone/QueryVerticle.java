@@ -18,6 +18,9 @@
 
 package com.glencoesoftware.omero.ms.backbone;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -52,7 +55,6 @@ public class QueryVerticle extends AbstractVerticle {
     @Override
     public void start(Future<Void> future) {
         log.info("Starting verticle");
-
         HttpServer server = vertx.createHttpServer();
         Router router = Router.router(vertx);
 
@@ -87,7 +89,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("type", type);
         data.put("id", id);
-        vertx.eventBus().<String>send(
+        vertx.eventBus().<byte[]>send(
                 BackboneVerticle.GET_OBJECT_EVENT,
                 Json.encode(data), result -> {
             String s = "";
@@ -103,7 +105,12 @@ public class QueryVerticle extends AbstractVerticle {
                     return;
                 }
                 response.headers().set("Content-Type", "text/plain");
-                s = result.result().body();
+                ByteArrayInputStream bais =
+                        new ByteArrayInputStream(result.result().body());
+                ObjectInputStream ois = new ObjectInputStream(bais);
+                s = ois.readObject().toString();
+            } catch (IOException | ClassNotFoundException e) {
+                log.error("Exception while decoding object in response", e);
             } finally {
                 response.end(s);
                 log.debug("Response ended");
