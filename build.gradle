@@ -31,13 +31,11 @@ configurations.all {
 }
 
 dependencies {
-    compile 'ch.qos.logback:logback-classic:1.1.1'
     compile 'io.vertx:vertx-web:3.5.3'
     compile 'io.vertx:vertx-hazelcast:3.5.3'
-    compileOnly('omero:blitz:5.4.7-ice36-b93') {
+    compileOnly('omero:blitz:5.4.10-ice36-b105') {
         exclude group: 'org.testng', module: 'testng'
     }
-    compile 'org.perf4j:perf4j:0.9.16'
 
     testCompile 'org.testng:testng:6.10'
 }
