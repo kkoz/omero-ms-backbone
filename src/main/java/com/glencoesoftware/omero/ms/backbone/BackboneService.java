@@ -18,7 +18,17 @@
 
 package com.glencoesoftware.omero.ms.backbone;
 
+import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Optional;
+
 import org.slf4j.LoggerFactory;
+
+import com.hazelcast.config.Config;
+import com.hazelcast.config.XmlConfigBuilder;
 
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
@@ -28,6 +38,7 @@ import io.vertx.core.spi.cluster.ClusterManager;
 import io.vertx.spi.cluster.hazelcast.HazelcastClusterManager;
 import ome.services.sessions.SessionManager;
 import ome.services.util.Executor;
+import ome.system.PreferenceContext;
 
 
 /**
@@ -46,16 +57,24 @@ public class BackboneService {
 
     private final SessionManager sessionManager;
 
-    BackboneService(Executor executor, SessionManager sessionManager) {
+    BackboneService(Executor executor, SessionManager sessionManager,
+                    PreferenceContext preferenceContext) {
         this.executor = executor;
         this.sessionManager = sessionManager;
+        String clusterHost = Optional.ofNullable(preferenceContext.getProperty(
+            "omero.ms.backbone.cluster_host"
+        )).orElse(VertxOptions.DEFAULT_CLUSTER_HOST);
 
-        log.debug("Initializing Backbone Service");
+        log.debug("Initializing Backbone -- cluster host {}", clusterHost);
         backboneVerticle = new BackboneVerticle(executor, sessionManager);
 
-        ClusterManager clusterManager = new HazelcastClusterManager();
-        VertxOptions options =
-                new VertxOptions().setClusterManager(clusterManager);
+        Config hazelcastConfig = getHazelcastConfig();
+        hazelcastConfig.setProperty("hazelcast.logging.type", "slf4j");
+        ClusterManager clusterManager =
+                new HazelcastClusterManager(hazelcastConfig);
+        VertxOptions options = new VertxOptions()
+                .setClusterManager(clusterManager)
+                .setClusterHost(clusterHost);
         Vertx.clusteredVertx(options, new Handler<AsyncResult<Vertx>>() {
             @Override
             public void handle(AsyncResult<Vertx> event) {
@@ -69,4 +88,27 @@ public class BackboneService {
         });
     }
 
+    /**
+     * Retrieves the Hazelcast configuration either from the OMERO
+     * configuration directory or Hazelcast defaults.
+     */
+    private Config getHazelcastConfig() {
+        File configFile =
+                new File(new File(new File("."), "etc"), "hazelcast.xml");
+        Config config = new Config();
+        if (configFile.exists()) {
+            log.info("Loading Hazelcast configuration: {}",
+                     configFile.getAbsolutePath());
+            try (InputStream is = new FileInputStream(configFile);
+                 InputStream bis = new BufferedInputStream(is)) {
+                config = new XmlConfigBuilder(bis).build();
+            } catch (IOException e) {
+                log.error("Failed to read Hazelcast configuration", e);
+            }
+        } else {
+            log.debug("Hazelcast configuration file {} not found",
+                      configFile.getAbsolutePath());
+        }
+        return config;
+    }
 }

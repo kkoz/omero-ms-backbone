@@ -9,6 +9,7 @@
   <bean name="omero-ms-backbone" class="com.glencoesoftware.omero.ms.backbone.BackboneService">
     <constructor-arg ref="executor"/>
     <constructor-arg ref="sessionManager"/>
+    <constructor-arg ref="preferenceContext"/>
   </bean>
 
 </beans>
