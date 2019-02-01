@@ -32,7 +32,6 @@ import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
 import ome.api.IQuery;
 import ome.model.IObject;
-import ome.model.internal.Details;
 import ome.services.sessions.SessionManager;
 import ome.services.util.Executor;
 import ome.system.Principal;
