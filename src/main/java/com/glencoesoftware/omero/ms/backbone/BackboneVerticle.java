@@ -20,6 +20,7 @@ package com.glencoesoftware.omero.ms.backbone;
 
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
+import java.util.List;
 
 import org.hibernate.Session;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
+import ome.api.IPixels;
 import ome.api.IQuery;
 import ome.model.IObject;
 import ome.services.sessions.SessionManager;
@@ -51,6 +53,9 @@ public class BackboneVerticle extends AbstractVerticle {
 
     public static final String GET_OBJECT_EVENT =
             "omero.get_object";
+
+    public static final String GET_ALL_ENUMERATIONS_EVENT =
+            "omero.get_all_enumerations";
 
     /** OMERO server Spring application context. */
     private ApplicationContext context;
@@ -77,6 +82,15 @@ public class BackboneVerticle extends AbstractVerticle {
 
         vertx.eventBus().<String>consumer(
                 GET_OBJECT_EVENT, this::getObject);
+        vertx.eventBus().<String>consumer(
+                GET_ALL_ENUMERATIONS_EVENT, this::getAllEnumerations);
+    }
+
+    private ome.model.meta.Session getSession(JsonObject data) {
+        String sessionKey = data.getString("sessionKey");
+        log.debug("Session key: " + sessionKey);
+
+        return (ome.model.meta.Session) sessionManager.find(sessionKey);
     }
 
     private void getObject(Message<String> message) {
@@ -85,8 +99,7 @@ public class BackboneVerticle extends AbstractVerticle {
         log.debug("Session key: " + sessionKey);
 
         try {
-            ome.model.meta.Session session =
-                    (ome.model.meta.Session) sessionManager.find(sessionKey);
+            ome.model.meta.Session session = getSession(data);
             if (session == null) {
                 message.fail(403, "Session invalid");
                 return;
@@ -95,7 +108,7 @@ public class BackboneVerticle extends AbstractVerticle {
                     session.getUuid(),
                     "-1",
                     session.getDefaultEventType());
-            IObject o = (IObject) executor.execute(
+            Object o = executor.execute(
                     principal, new Executor.SimpleWork(this, "test") {
                 @Transactional(readOnly = true)
                 public IObject doWork(Session session, ServiceFactory sf) {
@@ -105,6 +118,50 @@ public class BackboneVerticle extends AbstractVerticle {
                                 IceMapper.omeroClass(
                                         data.getString("type"), true);
                         return iQuery.get(klass, data.getLong("id"));
+                    } catch (Exception e) {
+                        message.fail(500, e.getMessage());
+                    }
+                    return null;
+                }
+            });
+            // May contain non-serializable objects
+            contextsFilter.filter("", o);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
+                oos.writeObject(o);
+            }
+            message.reply(baos.toByteArray());
+        } catch (Exception e) {
+            log.error("Failure encoding", e);
+            message.fail(500, e.getMessage());
+        }
+    }
+
+    private void getAllEnumerations(Message<String> message) {
+        JsonObject data = new JsonObject(message.body());
+        String sessionKey = data.getString("sessionKey");
+        log.debug("Session key: " + sessionKey);
+
+        try {
+            ome.model.meta.Session session = getSession(data);
+            if (session == null) {
+                message.fail(403, "Session invalid");
+                return;
+            }
+            Principal principal = new Principal(
+                    session.getUuid(),
+                    "-1",
+                    session.getDefaultEventType());
+            Object o = executor.execute(
+                    principal, new Executor.SimpleWork(this, "test") {
+                @Transactional(readOnly = true)
+                public List<? extends IObject> doWork(Session session, ServiceFactory sf) {
+                    IPixels iPixels = sf.getPixelsService();
+                    try {
+                        Class<? extends IObject> klass =
+                                IceMapper.omeroClass(
+                                        data.getString("type"), true);
+                        return iPixels.getAllEnumerations(klass);
                     } catch (Exception e) {
                         message.fail(500, e.getMessage());
                     }

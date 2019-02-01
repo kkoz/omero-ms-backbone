@@ -65,6 +65,9 @@ public class QueryVerticle extends AbstractVerticle {
         router.get("/api/:sessionKey/get/:type/:id")
             .handler(this::get);
 
+        router.get("/api/:sessionKey/getAllEnumerations/:type")
+            .handler(this::getAllEnumerations);
+
         int port = 9090;  // FIXME
         log.info("Starting HTTP server *:{}", port);
         server.requestHandler(router::accept).listen(port, result -> {
@@ -118,4 +121,43 @@ public class QueryVerticle extends AbstractVerticle {
         });
     }
 
+    private void getAllEnumerations(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        String type = request.params().get("type");
+        log.debug("Type: {}", type);
+
+        final Map<String, Object> data = new HashMap<String, Object>();
+        data.put("sessionKey", sessionKey);
+        data.put("type", type);
+        vertx.eventBus().<byte[]>send(
+                BackboneVerticle.GET_ALL_ENUMERATIONS_EVENT,
+                Json.encode(data), result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    Throwable t = result.cause();
+                    int statusCode = 404;
+                    if (t instanceof ReplyException) {
+                        statusCode = ((ReplyException) t).failureCode();
+                    }
+                    log.error("Request failed", t);
+                    response.setStatusCode(statusCode);
+                    return;
+                }
+                response.headers().set("Content-Type", "text/plain");
+                ByteArrayInputStream bais =
+                        new ByteArrayInputStream(result.result().body());
+                ObjectInputStream ois = new ObjectInputStream(bais);
+                s = ois.readObject().toString();
+            } catch (IOException | ClassNotFoundException e) {
+                log.error("Exception while decoding object in response", e);
+            } finally {
+                response.end(s);
+                log.debug("Response ended");
+            }
+        });
+    }
 }
