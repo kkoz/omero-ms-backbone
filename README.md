@@ -23,13 +23,13 @@ Workflow
 
 The microservice service infrastructure relies on the following workflow::
 
-1. Placement of all JARs from `lib` folder of the distribution into `lib/server`
-folder of your OMERO instance 
+1. Placement of all JARs from `lib` folder of the distribution into the
+`lib/server` folder of your OMERO instance
 
 1. Configuring `omero.ms.backbone.cluster_host` OMERO server configuration
 property if required
 
-1. Configuration of Hazelcast via the `hazelcast.xml` enclosed in the
+1. Configuration of Hazelcast via the `hazelcast.xml.example` enclosed in the
 distribution and placement in the `etc` folder of your OMERO instance
 
 1. Symlinking of the `omero-ms-backbone*.jar` to `extensions.jar` in order to
