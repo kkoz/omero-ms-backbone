@@ -68,6 +68,9 @@ public class QueryVerticle extends AbstractVerticle {
         router.get("/api/:sessionKey/getAllEnumerations/:type")
             .handler(this::getAllEnumerations);
 
+        router.get("/api/:sessionKey/getPixelsIdAndSeries/:imageId")
+            .handler(this::getPixelsIdAndSeries);
+
         int port = 9090;  // FIXME
         log.info("Starting HTTP server *:{}", port);
         server.requestHandler(router::accept).listen(port, result -> {
@@ -160,4 +163,45 @@ public class QueryVerticle extends AbstractVerticle {
             }
         });
     }
+
+    private void getPixelsIdAndSeries(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        Long imageId = Long.parseLong(request.params().get("imageId"));
+        log.debug("Image ID: {}", imageId);
+
+        final Map<String, Object> data = new HashMap<String, Object>();
+        data.put("sessionKey", sessionKey);
+        data.put("imageId", imageId);
+        vertx.eventBus().<byte[]>send(
+                BackboneVerticle.GET_PIXELS_ID_AND_SERIES,
+                Json.encode(data), result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    Throwable t = result.cause();
+                    int statusCode = 404;
+                    if (t instanceof ReplyException) {
+                        statusCode = ((ReplyException) t).failureCode();
+                    }
+                    log.error("Request failed", t);
+                    response.setStatusCode(statusCode);
+                    return;
+                }
+                response.headers().set("Content-Type", "text/plain");
+                ByteArrayInputStream bais =
+                        new ByteArrayInputStream(result.result().body());
+                ObjectInputStream ois = new ObjectInputStream(bais);
+                s = ois.readObject().toString();
+            } catch (IOException | ClassNotFoundException e) {
+                log.error("Exception while decoding object in response", e);
+            } finally {
+                response.end(s);
+                log.debug("Response ended");
+            }
+        });
+    }
+
 }
