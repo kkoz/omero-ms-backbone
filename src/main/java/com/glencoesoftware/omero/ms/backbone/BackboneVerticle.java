@@ -65,6 +65,9 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_RENDERING_SETTINGS =
             "omero.get_rendering_settings";
 
+    public static final String GET_PIXELS =
+            "omero.get_pixels";
+
     /** OMERO server Spring application context. */
     private ApplicationContext context;
 
@@ -96,6 +99,8 @@ public class BackboneVerticle extends AbstractVerticle {
                 GET_PIXELS_ID_AND_SERIES, this::getPixelsIdAndSeries);
         vertx.eventBus().<String>consumer(
                 GET_RENDERING_SETTINGS, this::getRenderingSettings);
+        vertx.eventBus().<String>consumer(
+                GET_PIXELS, this::getPixels);
     }
 
     private ome.model.meta.Session getSession(JsonObject data) {
@@ -104,8 +109,9 @@ public class BackboneVerticle extends AbstractVerticle {
 
         return (ome.model.meta.Session) sessionManager.find(sessionKey);
     }
-
-    private void getObject(Message<String> message) {
+    
+    private void handleMessageWithJob(Message<String> message,
+    		Executor.SimpleWork job) {
         JsonObject data = new JsonObject(message.body());
         String sessionKey = data.getString("sessionKey");
         log.debug("Session key: " + sessionKey);
@@ -121,22 +127,7 @@ public class BackboneVerticle extends AbstractVerticle {
                     "-1",
                     session.getDefaultEventType());
             Object o = executor.execute(
-                    principal, new Executor.SimpleWork(this, "getObject") {
-                @Transactional(readOnly = true)
-                public IObject doWork(Session session, ServiceFactory sf) {
-                    IQuery iQuery = sf.getQueryService();
-                    try {
-                        Class<? extends IObject> klass =
-                                IceMapper.omeroClass(
-                                        data.getString("type"), true);
-                        return iQuery.get(klass, data.getLong("id"));
-                    } catch (Exception e) {
-                        log.error("Error retrieving data", e);
-                        message.fail(500, e.getMessage());
-                    }
-                    return null;
-                }
-            });
+                    principal, job);
             // May contain non-serializable objects
             contextsFilter.filter("", o);
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -150,138 +141,111 @@ public class BackboneVerticle extends AbstractVerticle {
         }
     }
 
-    private void getAllEnumerations(Message<String> message) {
+    private void getObject(Message<String> message) {
         JsonObject data = new JsonObject(message.body());
-        String sessionKey = data.getString("sessionKey");
-        log.debug("Session key: " + sessionKey);
-
-        try {
-            ome.model.meta.Session session = getSession(data);
-            if (session == null) {
-                message.fail(403, "Session invalid");
-                return;
-            }
-            Principal principal = new Principal(
-                    session.getUuid(),
-                    "-1",
-                    session.getDefaultEventType());
-            Object o = executor.execute(
-                    principal, new Executor.SimpleWork(this, "getAllEnumerations") {
-                @Transactional(readOnly = true)
-                public List<? extends IObject> doWork(Session session, ServiceFactory sf) {
-                    IPixels iPixels = sf.getPixelsService();
-                    try {
-                        Class<? extends IObject> klass =
-                                IceMapper.omeroClass(
-                                        data.getString("type"), true);
-                        return iPixels.getAllEnumerations(klass);
-                    } catch (Exception e) {
-                        log.error("Error retrieving data", e);
-                        message.fail(500, e.getMessage());
-                    }
-                    return null;
+        
+        Executor.SimpleWork job = new Executor.SimpleWork(this, "getObject") {
+            @Transactional(readOnly = true)
+            public IObject doWork(Session session, ServiceFactory sf) {
+                IQuery iQuery = sf.getQueryService();
+                try {
+                    Class<? extends IObject> klass =
+                            IceMapper.omeroClass(
+                                    data.getString("type"), true);
+                    return iQuery.get(klass, data.getLong("id"));
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
                 }
-            });
-            // May contain non-serializable objects
-            contextsFilter.filter("", o);
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-                oos.writeObject(o);
+                return null;
             }
-            message.reply(baos.toByteArray());
-        } catch (Exception e) {
-            log.error("Failure encoding", e);
-            message.fail(500, e.getMessage());
-        }
+        };
+        handleMessageWithJob(message, job);
+    }
+
+    private void getAllEnumerations(Message<String> message) {
+    	JsonObject data = new JsonObject(message.body());
+    	Executor.SimpleWork job = new Executor.SimpleWork(this, "test") {
+            @Transactional(readOnly = true)
+            public List<? extends IObject> doWork(Session session, ServiceFactory sf) {
+                IPixels iPixels = sf.getPixelsService();
+                try {
+                    Class<? extends IObject> klass =
+                            IceMapper.omeroClass(
+                                    data.getString("type"), true);
+                    return iPixels.getAllEnumerations(klass);
+                } catch (Exception e) {
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(message, job);
     }
 
     private void getPixelsIdAndSeries(Message<String> message) {
         JsonObject data = new JsonObject(message.body());
-        String sessionKey = data.getString("sessionKey");
-        log.debug("Session key: " + sessionKey);
-
-        try {
-            ome.model.meta.Session session = getSession(data);
-            if (session == null) {
-                message.fail(403, "Session invalid");
-                return;
-            }
-            Principal principal = new Principal(
-                    session.getUuid(),
-                    "-1",
-                    session.getDefaultEventType());
-            Object o = executor.execute(
-                    principal, new Executor.SimpleWork(this, "getPixelsIdAndSeries") {
-                @Transactional(readOnly = true)
-                public List<Object[]> doWork(Session session, ServiceFactory sf) {
-                    IQuery iQuery = sf.getQueryService();
-                    Parameters parameters = new Parameters();
-                    parameters.addId(data.getLong("imageId"));
-                    try {
-                        return iQuery.projection(
-                            "SELECT p.id, p.image.series FROM Pixels as p " +
-                            "WHERE p.image.id = :id", parameters);
-                    } catch (Exception e) {
-                        log.error("Error retrieving data", e);
-                        message.fail(500, e.getMessage());
-                    }
-                    return null;
+        Executor.SimpleWork job = new Executor.SimpleWork(this, "getPixelsIdAndSeries") {
+            @Transactional(readOnly = true)
+            public List<Object[]> doWork(Session session, ServiceFactory sf) {
+                IQuery iQuery = sf.getQueryService();
+                Parameters parameters = new Parameters();
+                parameters.addId(data.getLong("imageId"));
+                try {
+                    return iQuery.projection(
+                        "SELECT p.id, p.image.series FROM Pixels as p " +
+                        "WHERE p.image.id = :id", parameters);
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
                 }
-            });
-            // May contain non-serializable objects
-            contextsFilter.filter("", o);
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-                oos.writeObject(o);
+                return null;
             }
-            message.reply(baos.toByteArray());
-        } catch (Exception e) {
-            log.error("Failure encoding", e);
-            message.fail(500, e.getMessage());
-        }
+        };
+        handleMessageWithJob(message, job);
     }
 
     private void getRenderingSettings(Message<String> message) {
         JsonObject data = new JsonObject(message.body());
-        String sessionKey = data.getString("sessionKey");
-        log.debug("Session key: " + sessionKey);
-
-        try {
-            ome.model.meta.Session session = getSession(data);
-            if (session == null) {
-                message.fail(403, "Session invalid");
-                return;
-            }
-            Principal principal = new Principal(
-                    session.getUuid(),
-                    "-1",
-                    session.getDefaultEventType());
-            Object o = executor.execute(
-                    principal, new Executor.SimpleWork(this, "getRenderingSettings") {
-                @Transactional(readOnly = true)
-                public RenderingDef doWork(Session session, ServiceFactory sf) {
-                    IPixels iPixels = sf.getPixelsService();
-                    try {
-                        Long pixelsId = data.getLong("pixelsId");
-                        return iPixels.retrieveRndSettings(pixelsId);
-                    } catch (Exception e) {
-                        log.error("Error retrieving data", e);
-                        message.fail(500, e.getMessage());
-                    }
-                    return null;
+        Executor.SimpleWork job = new Executor.SimpleWork(this, "getRenderingSettings") {
+            @Transactional(readOnly = true)
+            public RenderingDef doWork(Session session, ServiceFactory sf) {
+                IPixels iPixels = sf.getPixelsService();
+                try {
+                    Long pixelsId = data.getLong("pixelsId");
+                    return iPixels.retrieveRndSettings(pixelsId);
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
                 }
-            });
-            // May contain non-serializable objects
-            contextsFilter.filter("", o);
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-                oos.writeObject(o);
+                return null;
             }
-            message.reply(baos.toByteArray());
-        } catch (Exception e) {
-            log.error("Failure encoding", e);
-            message.fail(500, e.getMessage());
-        }
+        };
+        handleMessageWithJob(message, job);
+    }
+
+    private void getPixels(Message<String> message) {
+        JsonObject data = new JsonObject(message.body());
+        Executor.SimpleWork job = new Executor.SimpleWork(this, "getPixels") {
+            @Transactional(readOnly = true)
+            public IObject doWork(Session session, ServiceFactory sf) {
+                IQuery iQuery = sf.getQueryService();
+                Parameters parameters = new Parameters();
+                parameters.addId(data.getLong("imageId"));
+                try {
+                    return iQuery.findByQuery("SELECT p FROM Pixels as p " +
+                            "JOIN FETCH p.image " +
+                            "JOIN FETCH p.pixelsType " +
+                            "WHERE p.image.id = :id",
+                            parameters);
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(message, job);
     }
 
 }
