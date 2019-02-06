@@ -228,12 +228,12 @@ public class BackboneVerticle extends AbstractVerticle {
         JsonObject data = new JsonObject(message.body());
         Executor.SimpleWork job = new Executor.SimpleWork(this, "getPixels") {
             @Transactional(readOnly = true)
-            public List<Object[]> doWork(Session session, ServiceFactory sf) {
+            public IObject doWork(Session session, ServiceFactory sf) {
                 IQuery iQuery = sf.getQueryService();
                 Parameters parameters = new Parameters();
                 parameters.addId(data.getLong("imageId"));
                 try {
-                    return iQuery.projection("SELECT p FROM Pixels as p " +
+                    return iQuery.findByQuery("SELECT p FROM Pixels as p " +
                             "JOIN FETCH p.image " +
                             "JOIN FETCH p.pixelsType " +
                             "WHERE p.image.id = :id",
