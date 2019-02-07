@@ -62,6 +62,12 @@ public class QueryVerticle extends AbstractVerticle {
         router.route().handler(CookieHandler.create());
 
         // Thumbnail request handlers
+        router.get("/api/:sessionKey/isSessionValid")
+            .handler(this::isSessionValid);
+
+        router.get("/api/:sessionKey/canRead/:type/:id")
+            .handler(this::canRead);
+
         router.get("/api/:sessionKey/get/:type/:id")
             .handler(this::get);
 
@@ -84,6 +90,75 @@ public class QueryVerticle extends AbstractVerticle {
                 future.complete();
             } else {
                 future.fail(result.cause());
+            }
+        });
+    }
+
+    private void isSessionValid(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+
+        final Map<String, Object> data = new HashMap<String, Object>();
+        data.put("sessionKey", sessionKey);
+        vertx.eventBus().<Boolean>send(
+                BackboneVerticle.IS_SESSION_VALID_EVENT,
+                Json.encode(data), result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    Throwable t = result.cause();
+                    int statusCode = 404;
+                    if (t instanceof ReplyException) {
+                        statusCode = ((ReplyException) t).failureCode();
+                    }
+                    log.error("Request failed", t);
+                    response.setStatusCode(statusCode);
+                    return;
+                }
+                response.headers().set("Content-Type", "text/plain");
+                s = result.result().body().toString();
+            } finally {
+                response.end(s);
+                log.debug("Response ended");
+            }
+        });
+    }
+
+    private void canRead(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        String type = request.params().get("type");
+        long id = Long.parseLong(request.params().get("id"));
+        log.debug("Type: {} Id: {}", type, id);
+
+        final Map<String, Object> data = new HashMap<String, Object>();
+        data.put("sessionKey", sessionKey);
+        data.put("type", type);
+        data.put("id", id);
+        vertx.eventBus().<Boolean>send(
+                BackboneVerticle.CAN_READ_EVENT,
+                Json.encode(data), result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    Throwable t = result.cause();
+                    int statusCode = 404;
+                    if (t instanceof ReplyException) {
+                        statusCode = ((ReplyException) t).failureCode();
+                    }
+                    log.error("Request failed", t);
+                    response.setStatusCode(statusCode);
+                    return;
+                }
+                response.headers().set("Content-Type", "text/plain");
+                s = result.result().body().toString();
+            } finally {
+                response.end(s);
+                log.debug("Response ended");
             }
         });
     }

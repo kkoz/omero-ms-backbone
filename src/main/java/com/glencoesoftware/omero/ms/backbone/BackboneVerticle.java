@@ -53,6 +53,12 @@ public class BackboneVerticle extends AbstractVerticle {
     private static final org.slf4j.Logger log =
             LoggerFactory.getLogger(BackboneVerticle.class);
 
+    public static final String IS_SESSION_VALID_EVENT =
+            "omero.is_session_valid";
+
+    public static final String CAN_READ_EVENT =
+            "omero.can_read";
+
     public static final String GET_OBJECT_EVENT =
             "omero.get_object";
 
@@ -91,6 +97,10 @@ public class BackboneVerticle extends AbstractVerticle {
     public void start(Future<Void> future) {
         log.info("Starting verticle");
 
+        vertx.eventBus().<String>consumer(
+                IS_SESSION_VALID_EVENT, this::isSessionValid);
+        vertx.eventBus().<String>consumer(
+                CAN_READ_EVENT, this::canRead);
         vertx.eventBus().<String>consumer(
                 GET_OBJECT_EVENT, this::getObject);
         vertx.eventBus().<String>consumer(
@@ -139,6 +149,39 @@ public class BackboneVerticle extends AbstractVerticle {
             log.error("Failure encoding", e);
             message.fail(500, e.getMessage());
         }
+    }
+
+    private void isSessionValid(Message<String> message) {
+        try {
+            message.reply(new Boolean(
+                    getSession(new JsonObject(message.body())) != null));
+        } catch (Exception e) {
+            log.error("Error validating session", e);
+            message.fail(500, e.getMessage());
+        }
+    }
+
+    private void canRead(Message<String> message) {
+        JsonObject data = new JsonObject(message.body());
+
+        Executor.SimpleWork job = new Executor.SimpleWork(this, "canRead") {
+            @Transactional(readOnly = true)
+            public Boolean doWork(Session session, ServiceFactory sf) {
+                IQuery iQuery = sf.getQueryService();
+                try {
+                    Class<? extends IObject> klass =
+                            IceMapper.omeroClass(
+                                    data.getString("type"), true);
+                    message.reply(new Boolean(
+                            iQuery.find(klass, data.getLong("id")) != null));
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(message, job);
     }
 
     private void getObject(Message<String> message) {
