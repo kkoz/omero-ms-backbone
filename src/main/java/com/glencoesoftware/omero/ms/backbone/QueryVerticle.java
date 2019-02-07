@@ -257,7 +257,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("imageId", imageId);
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_PIXELS_ID_AND_SERIES,
+                BackboneVerticle.GET_PIXELS_ID_AND_SERIES_EVENT,
                 Json.encode(data), result -> {
             String s = "";
             try {
@@ -297,7 +297,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("pixelsId", pixelsId);
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_RENDERING_SETTINGS,
+                BackboneVerticle.GET_RENDERING_SETTINGS_EVENT,
                 Json.encode(data), result -> {
             String s = "";
             try {
@@ -337,7 +337,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("imageId", imageId);
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_PIXELS,
+                BackboneVerticle.GET_PIXELS_EVENT,
                 Json.encode(data), result -> {
             String s = "";
             try {

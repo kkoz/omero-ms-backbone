@@ -65,13 +65,13 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_ALL_ENUMERATIONS_EVENT =
             "omero.get_all_enumerations";
 
-    public static final String GET_PIXELS_ID_AND_SERIES =
+    public static final String GET_PIXELS_ID_AND_SERIES_EVENT =
             "omero.get_pixels_id_and_series";
 
-    public static final String GET_RENDERING_SETTINGS =
+    public static final String GET_RENDERING_SETTINGS_EVENT =
             "omero.get_rendering_settings";
 
-    public static final String GET_PIXELS =
+    public static final String GET_PIXELS_EVENT =
             "omero.get_pixels";
 
     /** OMERO server Spring application context. */
@@ -106,11 +106,11 @@ public class BackboneVerticle extends AbstractVerticle {
         vertx.eventBus().<String>consumer(
                 GET_ALL_ENUMERATIONS_EVENT, this::getAllEnumerations);
         vertx.eventBus().<String>consumer(
-                GET_PIXELS_ID_AND_SERIES, this::getPixelsIdAndSeries);
+                GET_PIXELS_ID_AND_SERIES_EVENT, this::getPixelsIdAndSeries);
         vertx.eventBus().<String>consumer(
-                GET_RENDERING_SETTINGS, this::getRenderingSettings);
+                GET_RENDERING_SETTINGS_EVENT, this::getRenderingSettings);
         vertx.eventBus().<String>consumer(
-                GET_PIXELS, this::getPixels);
+                GET_PIXELS_EVENT, this::getPixels);
     }
 
     private ome.model.meta.Session getSession(JsonObject data) {
