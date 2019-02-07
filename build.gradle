@@ -36,6 +36,9 @@ dependencies {
     compileOnly('omero:blitz:5.4.10-ice36-b105') {
         exclude group: 'org.testng', module: 'testng'
     }
+    testCompileOnly('omero:blitz:5.4.10-ice36-b105') {
+        exclude group: 'org.testng', module: 'testng'
+    }
 
     testCompile 'org.testng:testng:6.10'
 }
