@@ -119,9 +119,9 @@ public class BackboneVerticle extends AbstractVerticle {
 
         return (ome.model.meta.Session) sessionManager.find(sessionKey);
     }
-    
-    private void handleMessageWithJob(Message<String> message,
-    		Executor.SimpleWork job) {
+
+    private void handleMessageWithJob(
+            Message<String> message, Executor.SimpleWork job) {
         JsonObject data = new JsonObject(message.body());
         String sessionKey = data.getString("sessionKey");
         log.debug("Session key: " + sessionKey);
@@ -163,7 +163,6 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void canRead(Message<String> message) {
         JsonObject data = new JsonObject(message.body());
-
         Executor.SimpleWork job = new Executor.SimpleWork(this, "canRead") {
             @Transactional(readOnly = true)
             public Boolean doWork(Session session, ServiceFactory sf) {
@@ -186,7 +185,6 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void getObject(Message<String> message) {
         JsonObject data = new JsonObject(message.body());
-        
         Executor.SimpleWork job = new Executor.SimpleWork(this, "getObject") {
             @Transactional(readOnly = true)
             public IObject doWork(Session session, ServiceFactory sf) {
@@ -207,8 +205,8 @@ public class BackboneVerticle extends AbstractVerticle {
     }
 
     private void getAllEnumerations(Message<String> message) {
-    	JsonObject data = new JsonObject(message.body());
-    	Executor.SimpleWork job = new Executor.SimpleWork(this, "test") {
+        JsonObject data = new JsonObject(message.body());
+        Executor.SimpleWork job = new Executor.SimpleWork(this, "test") {
             @Transactional(readOnly = true)
             public List<? extends IObject> doWork(Session session, ServiceFactory sf) {
                 IPixels iPixels = sf.getPixelsService();
