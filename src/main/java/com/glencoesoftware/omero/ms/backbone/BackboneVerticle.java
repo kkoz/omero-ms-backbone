@@ -34,6 +34,8 @@ import io.vertx.core.json.JsonObject;
 import ome.api.IPixels;
 import ome.api.IQuery;
 import ome.model.IObject;
+import ome.model.core.Image;
+import ome.model.core.Pixels;
 import ome.model.display.RenderingDef;
 import ome.parameters.Parameters;
 import ome.services.sessions.SessionManager;
@@ -65,14 +67,11 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_ALL_ENUMERATIONS_EVENT =
             "omero.get_all_enumerations";
 
-    public static final String GET_PIXELS_ID_AND_SERIES_EVENT =
-            "omero.get_pixels_id_and_series";
-
     public static final String GET_RENDERING_SETTINGS_EVENT =
             "omero.get_rendering_settings";
 
-    public static final String GET_PIXELS_EVENT =
-            "omero.get_pixels";
+    public static final String GET_PIXELS_DESCRIPTION_EVENT =
+            "omero.get_pixels_description";
 
     /** OMERO server Spring application context. */
     private ApplicationContext context;
@@ -106,11 +105,9 @@ public class BackboneVerticle extends AbstractVerticle {
         vertx.eventBus().<String>consumer(
                 GET_ALL_ENUMERATIONS_EVENT, this::getAllEnumerations);
         vertx.eventBus().<String>consumer(
-                GET_PIXELS_ID_AND_SERIES_EVENT, this::getPixelsIdAndSeries);
-        vertx.eventBus().<String>consumer(
                 GET_RENDERING_SETTINGS_EVENT, this::getRenderingSettings);
         vertx.eventBus().<String>consumer(
-                GET_PIXELS_EVENT, this::getPixels);
+                GET_PIXELS_DESCRIPTION_EVENT, this::getPixelsDescription);
     }
 
     private ome.model.meta.Session getSession(JsonObject data) {
@@ -224,28 +221,6 @@ public class BackboneVerticle extends AbstractVerticle {
         handleMessageWithJob(message, job);
     }
 
-    private void getPixelsIdAndSeries(Message<String> message) {
-        JsonObject data = new JsonObject(message.body());
-        Executor.SimpleWork job = new Executor.SimpleWork(this, "getPixelsIdAndSeries") {
-            @Transactional(readOnly = true)
-            public List<Object[]> doWork(Session session, ServiceFactory sf) {
-                IQuery iQuery = sf.getQueryService();
-                Parameters parameters = new Parameters();
-                parameters.addId(data.getLong("imageId"));
-                try {
-                    return iQuery.projection(
-                        "SELECT p.id, p.image.series FROM Pixels as p " +
-                        "WHERE p.image.id = :id", parameters);
-                } catch (Exception e) {
-                    log.error("Error retrieving data", e);
-                    message.fail(500, e.getMessage());
-                }
-                return null;
-            }
-        };
-        handleMessageWithJob(message, job);
-    }
-
     private void getRenderingSettings(Message<String> message) {
         JsonObject data = new JsonObject(message.body());
         Executor.SimpleWork job = new Executor.SimpleWork(this, "getRenderingSettings") {
@@ -265,20 +240,25 @@ public class BackboneVerticle extends AbstractVerticle {
         handleMessageWithJob(message, job);
     }
 
-    private void getPixels(Message<String> message) {
+    private void getPixelsDescription(Message<String> message) {
         JsonObject data = new JsonObject(message.body());
-        Executor.SimpleWork job = new Executor.SimpleWork(this, "getPixels") {
+        Executor.SimpleWork job = new Executor.SimpleWork(this, "getPixelsDescription") {
             @Transactional(readOnly = true)
-            public IObject doWork(Session session, ServiceFactory sf) {
+            public Pixels doWork(Session session, ServiceFactory sf) {
                 IQuery iQuery = sf.getQueryService();
+                IPixels iPixels = sf.getPixelsService();
                 Parameters parameters = new Parameters();
                 parameters.addId(data.getLong("imageId"));
                 try {
-                    return iQuery.findByQuery("SELECT p FROM Pixels as p " +
-                            "JOIN FETCH p.image " +
-                            "JOIN FETCH p.pixelsType " +
-                            "WHERE p.image.id = :id",
+                    Image image = iQuery.findByQuery(
+                            "SELECT i FROM Image as i " +
+                            "JOIN FETCH i.pixels " +
+                            "WHERE i.id = :id",
                             parameters);
+                    Pixels pixels = iPixels.retrievePixDescription(
+                            image.getPrimaryPixels().getId());
+                    pixels.setImage(image);
+                    return pixels;
                 } catch (Exception e) {
                     log.error("Error retrieving data", e);
                     message.fail(500, e.getMessage());

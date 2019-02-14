@@ -36,6 +36,8 @@ import io.vertx.core.json.Json;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.CookieHandler;
+import ome.model.core.Image;
+import ome.model.core.Pixels;
 
 
 /**
@@ -74,13 +76,10 @@ public class QueryVerticle extends AbstractVerticle {
         router.get("/api/:sessionKey/getAllEnumerations/:type")
             .handler(this::getAllEnumerations);
 
-        router.get("/api/:sessionKey/getPixelsIdAndSeries/:imageId")
-            .handler(this::getPixelsIdAndSeries);
-
         router.get("/api/:sessionKey/getRenderingSettings/:pixelsId")
             .handler(this::getRenderingSettings);
 
-        router.get("/api/:sessionKey/getPixels/:imageId")
+        router.get("/api/:sessionKey/getPixelsDescription/:imageId")
             .handler(this::getPixels);
 
         int port = 9090;  // FIXME
@@ -245,46 +244,6 @@ public class QueryVerticle extends AbstractVerticle {
         });
     }
 
-    private void getPixelsIdAndSeries(RoutingContext event) {
-        final HttpServerRequest request = event.request();
-        final HttpServerResponse response = event.response();
-        String sessionKey = request.params().get("sessionKey");
-        log.debug("Session key: " + sessionKey);
-        Long imageId = Long.parseLong(request.params().get("imageId"));
-        log.debug("Image ID: {}", imageId);
-
-        final Map<String, Object> data = new HashMap<String, Object>();
-        data.put("sessionKey", sessionKey);
-        data.put("imageId", imageId);
-        vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_PIXELS_ID_AND_SERIES_EVENT,
-                Json.encode(data), result -> {
-            String s = "";
-            try {
-                if (result.failed()) {
-                    Throwable t = result.cause();
-                    int statusCode = 404;
-                    if (t instanceof ReplyException) {
-                        statusCode = ((ReplyException) t).failureCode();
-                    }
-                    log.error("Request failed", t);
-                    response.setStatusCode(statusCode);
-                    return;
-                }
-                response.headers().set("Content-Type", "text/plain");
-                ByteArrayInputStream bais =
-                        new ByteArrayInputStream(result.result().body());
-                ObjectInputStream ois = new ObjectInputStream(bais);
-                s = ois.readObject().toString();
-            } catch (IOException | ClassNotFoundException e) {
-                log.error("Exception while decoding object in response", e);
-            } finally {
-                response.end(s);
-                log.debug("Response ended");
-            }
-        });
-    }
-
     private void getRenderingSettings(RoutingContext event) {
         final HttpServerRequest request = event.request();
         final HttpServerResponse response = event.response();
@@ -337,7 +296,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("imageId", imageId);
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_PIXELS_EVENT,
+                BackboneVerticle.GET_PIXELS_DESCRIPTION_EVENT,
                 Json.encode(data), result -> {
             String s = "";
             try {
@@ -355,7 +314,10 @@ public class QueryVerticle extends AbstractVerticle {
                 ByteArrayInputStream bais =
                         new ByteArrayInputStream(result.result().body());
                 ObjectInputStream ois = new ObjectInputStream(bais);
-                s = ois.readObject().toString();
+                Pixels pixels = (Pixels) ois.readObject();
+                Image image = pixels.getImage();
+                s = String.format(
+                        "%s;%s;Series:%s", pixels, image, image.getSeries());
             } catch (IOException | ClassNotFoundException e) {
                 log.error("Exception while decoding object in response", e);
             } finally {
