@@ -33,6 +33,7 @@ import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.Json;
+import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.CookieHandler;
@@ -99,11 +100,10 @@ public class QueryVerticle extends AbstractVerticle {
         String sessionKey = request.params().get("sessionKey");
         log.debug("Session key: " + sessionKey);
 
-        final Map<String, Object> data = new HashMap<String, Object>();
+        final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
         vertx.eventBus().<Boolean>send(
-                BackboneVerticle.IS_SESSION_VALID_EVENT,
-                Json.encode(data), result -> {
+                BackboneVerticle.IS_SESSION_VALID_EVENT, data, result -> {
             String s = "";
             try {
                 if (result.failed()) {
@@ -134,13 +134,12 @@ public class QueryVerticle extends AbstractVerticle {
         long id = Long.parseLong(request.params().get("id"));
         log.debug("Type: {} Id: {}", type, id);
 
-        final Map<String, Object> data = new HashMap<String, Object>();
+        final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
         data.put("type", type);
         data.put("id", id);
         vertx.eventBus().<Boolean>send(
-                BackboneVerticle.CAN_READ_EVENT,
-                Json.encode(data), result -> {
+                BackboneVerticle.CAN_READ_EVENT, data, result -> {
             String s = "";
             try {
                 if (result.failed()) {
@@ -171,13 +170,12 @@ public class QueryVerticle extends AbstractVerticle {
         long id = Long.parseLong(request.params().get("id"));
         log.debug("Type: {} Id: {}", type, id);
 
-        final Map<String, Object> data = new HashMap<String, Object>();
+        final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
         data.put("type", type);
         data.put("id", id);
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_OBJECT_EVENT,
-                Json.encode(data), result -> {
+                BackboneVerticle.GET_OBJECT_EVENT, data, result -> {
             String s = "";
             try {
                 if (result.failed()) {
@@ -212,12 +210,11 @@ public class QueryVerticle extends AbstractVerticle {
         String type = request.params().get("type");
         log.debug("Type: {}", type);
 
-        final Map<String, Object> data = new HashMap<String, Object>();
+        final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
         data.put("type", type);
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_ALL_ENUMERATIONS_EVENT,
-                Json.encode(data), result -> {
+                BackboneVerticle.GET_ALL_ENUMERATIONS_EVENT, data, result -> {
             String s = "";
             try {
                 if (result.failed()) {
@@ -292,12 +289,11 @@ public class QueryVerticle extends AbstractVerticle {
         Long imageId = Long.parseLong(request.params().get("imageId"));
         log.debug("Image ID: {}", imageId);
 
-        final Map<String, Object> data = new HashMap<String, Object>();
+        final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
         data.put("imageId", imageId);
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_PIXELS_DESCRIPTION_EVENT,
-                Json.encode(data), result -> {
+                BackboneVerticle.GET_PIXELS_DESCRIPTION_EVENT, data, result -> {
             String s = "";
             try {
                 if (result.failed()) {

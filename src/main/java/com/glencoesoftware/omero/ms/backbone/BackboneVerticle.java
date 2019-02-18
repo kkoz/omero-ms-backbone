@@ -33,6 +33,8 @@ import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
 import ome.api.IPixels;
 import ome.api.IQuery;
+import ome.conditions.RemovedSessionException;
+import ome.conditions.SessionTimeoutException;
 import ome.model.IObject;
 import ome.model.core.Image;
 import ome.model.core.Pixels;
@@ -98,33 +100,30 @@ public class BackboneVerticle extends AbstractVerticle {
 
         vertx.eventBus().<String>consumer(
                 IS_SESSION_VALID_EVENT, this::isSessionValid);
-        vertx.eventBus().<String>consumer(
+        vertx.eventBus().<JsonObject>consumer(
                 CAN_READ_EVENT, this::canRead);
-        vertx.eventBus().<String>consumer(
+        vertx.eventBus().<JsonObject>consumer(
                 GET_OBJECT_EVENT, this::getObject);
-        vertx.eventBus().<String>consumer(
+        vertx.eventBus().<JsonObject>consumer(
                 GET_ALL_ENUMERATIONS_EVENT, this::getAllEnumerations);
-        vertx.eventBus().<String>consumer(
+        vertx.eventBus().<JsonObject>consumer(
                 GET_RENDERING_SETTINGS_EVENT, this::getRenderingSettings);
-        vertx.eventBus().<String>consumer(
+        vertx.eventBus().<JsonObject>consumer(
                 GET_PIXELS_DESCRIPTION_EVENT, this::getPixelsDescription);
     }
 
-    private ome.model.meta.Session getSession(JsonObject data) {
+    private void handleMessageWithJob(BackboneSimpleWork job) {
+        Message<JsonObject> message = job.getMessage();
+        JsonObject data = message.body();
         String sessionKey = data.getString("sessionKey");
-        log.debug("Session key: " + sessionKey);
-
-        return (ome.model.meta.Session) sessionManager.find(sessionKey);
-    }
-
-    private void handleMessageWithJob(
-            Message<String> message, Executor.SimpleWork job) {
-        JsonObject data = new JsonObject(message.body());
-        String sessionKey = data.getString("sessionKey");
-        log.debug("Session key: " + sessionKey);
-
         try {
-            ome.model.meta.Session session = getSession(data);
+            ome.model.meta.Session session = null;
+            try {
+                 session = (ome.model.meta.Session)
+                        sessionManager.find(sessionKey);
+            } catch (RemovedSessionException | SessionTimeoutException e) {
+                // No-op
+            }
             if (session == null) {
                 message.fail(403, "Session invalid");
                 return;
@@ -133,8 +132,7 @@ public class BackboneVerticle extends AbstractVerticle {
                     session.getUuid(),
                     "-1",
                     session.getDefaultEventType());
-            Object o = executor.execute(
-                    principal, job);
+            Object o = executor.execute(principal, job);
             // May contain non-serializable objects
             contextsFilter.filter("", o);
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -149,22 +147,22 @@ public class BackboneVerticle extends AbstractVerticle {
     }
 
     private void isSessionValid(Message<String> message) {
+        String sessionKey =
+                new JsonObject(message.body()).getString("sessionKey");
         try {
-            message.reply(new Boolean(
-                    getSession(new JsonObject(message.body())) != null));
+            message.reply(new Boolean(sessionManager.find(sessionKey) != null));
         } catch (Exception e) {
-            log.error("Error validating session", e);
-            message.fail(500, e.getMessage());
+            message.reply(Boolean.FALSE);
         }
     }
 
-    private void canRead(Message<String> message) {
-        JsonObject data = new JsonObject(message.body());
-        Executor.SimpleWork job = new Executor.SimpleWork(this, "canRead") {
+    private void canRead(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "canRead") {
             @Transactional(readOnly = true)
             public Boolean doWork(Session session, ServiceFactory sf) {
-                IQuery iQuery = sf.getQueryService();
                 try {
+                    JsonObject data = this.getMessage().body();
+                    IQuery iQuery = sf.getQueryService();
                     Class<? extends IObject> klass =
                             IceMapper.omeroClass(
                                     data.getString("type"), true);
@@ -177,16 +175,16 @@ public class BackboneVerticle extends AbstractVerticle {
                 return null;
             }
         };
-        handleMessageWithJob(message, job);
+        handleMessageWithJob(job);
     }
 
-    private void getObject(Message<String> message) {
-        JsonObject data = new JsonObject(message.body());
-        Executor.SimpleWork job = new Executor.SimpleWork(this, "getObject") {
+    private void getObject(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getObject") {
             @Transactional(readOnly = true)
             public IObject doWork(Session session, ServiceFactory sf) {
-                IQuery iQuery = sf.getQueryService();
                 try {
+                    JsonObject data = this.getMessage().body();
+                    IQuery iQuery = sf.getQueryService();
                     Class<? extends IObject> klass =
                             IceMapper.omeroClass(
                                     data.getString("type"), true);
@@ -198,16 +196,16 @@ public class BackboneVerticle extends AbstractVerticle {
                 return null;
             }
         };
-        handleMessageWithJob(message, job);
+        handleMessageWithJob(job);
     }
 
-    private void getAllEnumerations(Message<String> message) {
-        JsonObject data = new JsonObject(message.body());
-        Executor.SimpleWork job = new Executor.SimpleWork(this, "test") {
+    private void getAllEnumerations(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getAllEnumerations") {
             @Transactional(readOnly = true)
             public List<? extends IObject> doWork(Session session, ServiceFactory sf) {
-                IPixels iPixels = sf.getPixelsService();
                 try {
+                    IPixels iPixels = sf.getPixelsService();
+                    JsonObject data = this.getMessage().body();
                     Class<? extends IObject> klass =
                             IceMapper.omeroClass(
                                     data.getString("type"), true);
@@ -218,16 +216,16 @@ public class BackboneVerticle extends AbstractVerticle {
                 return null;
             }
         };
-        handleMessageWithJob(message, job);
+        handleMessageWithJob(job);
     }
 
-    private void getRenderingSettings(Message<String> message) {
-        JsonObject data = new JsonObject(message.body());
-        Executor.SimpleWork job = new Executor.SimpleWork(this, "getRenderingSettings") {
+    private void getRenderingSettings(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getRenderingSettings") {
             @Transactional(readOnly = true)
             public RenderingDef doWork(Session session, ServiceFactory sf) {
-                IPixels iPixels = sf.getPixelsService();
                 try {
+                    IPixels iPixels = sf.getPixelsService();
+                    JsonObject data = this.getMessage().body();
                     Long pixelsId = data.getLong("pixelsId");
                     return iPixels.retrieveRndSettings(pixelsId);
                 } catch (Exception e) {
@@ -237,19 +235,19 @@ public class BackboneVerticle extends AbstractVerticle {
                 return null;
             }
         };
-        handleMessageWithJob(message, job);
+        handleMessageWithJob(job);
     }
 
-    private void getPixelsDescription(Message<String> message) {
-        JsonObject data = new JsonObject(message.body());
-        Executor.SimpleWork job = new Executor.SimpleWork(this, "getPixelsDescription") {
+    private void getPixelsDescription(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getPixelsDescription") {
             @Transactional(readOnly = true)
             public Pixels doWork(Session session, ServiceFactory sf) {
-                IQuery iQuery = sf.getQueryService();
-                IPixels iPixels = sf.getPixelsService();
-                Parameters parameters = new Parameters();
-                parameters.addId(data.getLong("imageId"));
                 try {
+                    IQuery iQuery = sf.getQueryService();
+                    IPixels iPixels = sf.getPixelsService();
+                    JsonObject data = this.getMessage().body();
+                    Parameters parameters = new Parameters();
+                    parameters.addId(data.getLong("imageId"));
                     Image image = iQuery.findByQuery(
                             "SELECT i FROM Image as i " +
                             "JOIN FETCH i.pixels " +
@@ -266,7 +264,7 @@ public class BackboneVerticle extends AbstractVerticle {
                 return null;
             }
         };
-        handleMessageWithJob(message, job);
+        handleMessageWithJob(job);
     }
 
 }
