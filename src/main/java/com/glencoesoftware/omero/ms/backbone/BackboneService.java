@@ -31,6 +31,7 @@ import com.hazelcast.config.Config;
 import com.hazelcast.config.XmlConfigBuilder;
 
 import io.vertx.core.AsyncResult;
+import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
@@ -57,6 +58,9 @@ public class BackboneService {
 
     private final SessionManager sessionManager;
 
+    private final static int DEFAULT_WORKER_POOL_SIZE =
+            Runtime.getRuntime().availableProcessors() * 2;
+
     BackboneService(Executor executor, SessionManager sessionManager,
                     PreferenceContext preferenceContext) {
         this.executor = executor;
@@ -64,9 +68,19 @@ public class BackboneService {
         String clusterHost = Optional.ofNullable(preferenceContext.getProperty(
             "omero.ms.backbone.cluster_host"
         )).orElse(VertxOptions.DEFAULT_CLUSTER_HOST);
+        int workerPoolSize = Integer.parseInt(Optional.ofNullable(
+            preferenceContext.getProperty("omero.ms.backbone.worker_pool_size")
+        ).orElse(Integer.toString(DEFAULT_WORKER_POOL_SIZE)));
 
-        log.debug("Initializing Backbone -- cluster host {}", clusterHost);
+        log.debug(
+            "Initializing Backbone -- cluster host {} worker pool size {}",
+            clusterHost, workerPoolSize
+        );
         backboneVerticle = new BackboneVerticle(executor, sessionManager);
+        DeploymentOptions verticleOptions = new DeploymentOptions()
+                .setWorker(true)
+                .setInstances(workerPoolSize)
+                .setWorkerPoolSize(workerPoolSize);
 
         Config hazelcastConfig = getHazelcastConfig();
         hazelcastConfig.setProperty("hazelcast.logging.type", "slf4j");
@@ -80,7 +94,7 @@ public class BackboneService {
             public void handle(AsyncResult<Vertx> event) {
                 if (event.succeeded()) {
                     Vertx vertx = event.result();
-                    vertx.deployVerticle(backboneVerticle);
+                    vertx.deployVerticle(backboneVerticle, verticleOptions);
                 } else {
                     log.error("Failed to start Hazelcast clustered Vert.x");
                 }
