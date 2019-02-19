@@ -110,6 +110,8 @@ public class BackboneVerticle extends AbstractVerticle {
                 GET_RENDERING_SETTINGS_EVENT, this::getRenderingSettings);
         vertx.eventBus().<JsonObject>consumer(
                 GET_PIXELS_DESCRIPTION_EVENT, this::getPixelsDescription);
+
+        future.complete();
     }
 
     private void handleMessageWithJob(BackboneSimpleWork job) {
