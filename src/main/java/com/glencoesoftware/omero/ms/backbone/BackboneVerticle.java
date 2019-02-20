@@ -87,11 +87,6 @@ public class BackboneVerticle extends AbstractVerticle {
     private final DetailsContextsFilter contextsFilter =
             new DetailsContextsFilter();
 
-    public BackboneVerticle() {
-        this.executor = null;
-        this.sessionManager = null;
-    }
-
     public BackboneVerticle(Executor executor, SessionManager sessionManager) {
         this.executor = executor;
         this.sessionManager = sessionManager;
