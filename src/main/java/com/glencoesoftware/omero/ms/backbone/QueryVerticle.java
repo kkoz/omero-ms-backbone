@@ -36,7 +36,6 @@ import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
-import io.vertx.ext.web.handler.CookieHandler;
 import ome.model.core.Image;
 import ome.model.core.Pixels;
 
@@ -60,9 +59,6 @@ public class QueryVerticle extends AbstractVerticle {
         log.info("Starting verticle");
         HttpServer server = vertx.createHttpServer();
         Router router = Router.router(vertx);
-
-        // Cookie handler so we can pick up the OMERO.web session
-        router.route().handler(CookieHandler.create());
 
         // Thumbnail request handlers
         router.get("/api/:sessionKey/isSessionValid")
