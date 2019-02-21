@@ -96,9 +96,9 @@ public class BackboneVerticle extends AbstractVerticle {
     public void start() {
         EventBus eventBus = vertx.eventBus();
 
-        eventBus.<String>consumer(
-            IS_SESSION_VALID_EVENT, new Handler<Message<String>>() {
-                public void handle(Message<String> event) {
+        eventBus.<JsonObject>consumer(
+            IS_SESSION_VALID_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
                     isSessionValid(event);
                 };
             }
@@ -174,9 +174,8 @@ public class BackboneVerticle extends AbstractVerticle {
         }
     }
 
-    private void isSessionValid(Message<String> message) {
-        String sessionKey =
-                new JsonObject(message.body()).getString("sessionKey");
+    private void isSessionValid(Message<JsonObject> message) {
+        String sessionKey = message.body().getString("sessionKey");
         try {
             message.reply(new Boolean(sessionManager.find(sessionKey) != null));
         } catch (Exception e) {
