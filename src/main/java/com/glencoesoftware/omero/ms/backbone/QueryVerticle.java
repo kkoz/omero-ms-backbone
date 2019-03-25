@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.util.HashMap;
 import java.util.Map;
+import java.lang.Integer;
 
 import org.slf4j.LoggerFactory;
 
@@ -36,9 +37,13 @@ import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
+import ome.api.RawFileStore;
+import ome.model.annotations.FileAnnotation;
 import ome.model.core.Image;
+import ome.model.core.OriginalFile;
 import ome.model.core.Pixels;
 
 
@@ -80,6 +85,12 @@ public class QueryVerticle extends AbstractVerticle {
 
         router.get("/api/:sessionKey/getPixelsDescription/:imageId")
             .handler(this::getPixels);
+
+        router.get("/api/:sessionKey/getFileAnnotation/:annotationId")
+        .handler(this::getFileAnnotation);
+
+        router.get("/api/:sessionKey/getFileAnnotationDownload/:annotationId")
+        .handler(this::getFileAnnotationDownload);
 
         int port = 9090;  // FIXME
         log.info("Starting HTTP server *:{}", port);
@@ -285,6 +296,71 @@ public class QueryVerticle extends AbstractVerticle {
                         "%s;%s;Series:%s", pixels, image, image.getSeries());
             } catch (IOException | ClassNotFoundException e) {
                 log.error("Exception while decoding object in response", e);
+            } finally {
+                response.end(s);
+                log.debug("Response ended");
+            }
+        });
+    }
+
+    private void getFileAnnotation(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        Long annotationId = Long.parseLong(request.params().get("annotationId"));
+        log.debug("Image ID: {}", annotationId);
+
+        final JsonObject data = new JsonObject();
+        data.put("sessionKey", sessionKey);
+        data.put("annotationId", annotationId);
+        vertx.eventBus().<byte[]>send(
+                BackboneVerticle.GET_FILE_ANNOTATION_EVENT, data, result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    ifFailed(response, result);
+                    return;
+                }
+                response.headers().set("Content-Type", "text/plain");
+                FileAnnotation fileAnnotation = deserialize(result);
+                s = String.format(
+                        "%s;%s;", fileAnnotation, fileAnnotation.getFile());
+            } catch (IOException | ClassNotFoundException e) {
+                log.error("Exception while decoding object in response", e);
+            } finally {
+                response.end(s);
+                log.debug("Response ended");
+            }
+        });
+    }
+
+    private void getFileAnnotationDownload(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        Long annotationId = Long.parseLong(request.params().get("annotationId"));
+        log.debug("Image ID: {}", annotationId);
+
+        final JsonObject data = new JsonObject();
+        data.put("sessionKey", sessionKey);
+        data.put("annotationId", annotationId);
+        vertx.eventBus().<byte[]>send(
+                BackboneVerticle.GET_FILE_ANNOTATION_RAW_EVENT, data, result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    ifFailed(response, result);
+                    return;
+                }
+                byte[] fileBytes = result.result().body();
+                String fileLengthStr = Integer.toString(fileBytes.length);
+                response.end(Buffer.buffer(fileBytes));
+                response.headers().set("Content-Type", "application/octet-stream");
+                response.headers().set("Content-Length", fileLengthStr);
+                response.headers().set("Content-Disposition",
+                        "attachment; filename=\"testAnnotation.csv\"");
             } finally {
                 response.end(s);
                 log.debug("Response ended");

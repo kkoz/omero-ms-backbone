@@ -19,8 +19,12 @@
 package com.glencoesoftware.omero.ms.backbone;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.ObjectOutputStream;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import org.hibernate.Session;
 import org.slf4j.LoggerFactory;
@@ -31,12 +35,17 @@ import io.vertx.core.Handler;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
+import ome.api.IMetadata;
 import ome.api.IPixels;
 import ome.api.IQuery;
+import ome.api.RawFileStore;
 import ome.conditions.RemovedSessionException;
 import ome.conditions.SessionTimeoutException;
 import ome.model.IObject;
+import ome.model.annotations.Annotation;
+import ome.model.annotations.FileAnnotation;
 import ome.model.core.Image;
+import ome.model.core.OriginalFile;
 import ome.model.core.Pixels;
 import ome.model.display.RenderingDef;
 import ome.parameters.Parameters;
@@ -79,6 +88,13 @@ public class BackboneVerticle extends AbstractVerticle {
 
     public static final String GET_PIXELS_DESCRIPTION_EVENT =
             "omero.get_pixels_description";
+
+    public static final String GET_FILE_ANNOTATION_EVENT =
+            "omero.get_file_annotation";
+
+    public static final String GET_FILE_ANNOTATION_RAW_EVENT =
+            "omero.get_file_annotation_raw";
+
 
     private final Executor executor;
 
@@ -138,6 +154,20 @@ public class BackboneVerticle extends AbstractVerticle {
                 };
             }
         );
+        eventBus.<JsonObject>consumer(
+            GET_FILE_ANNOTATION_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    getFileAnnotation(event);
+                };
+            }
+        );
+        eventBus.<JsonObject>consumer(
+            GET_FILE_ANNOTATION_RAW_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    getFileAnnotationRaw(event);
+                };
+            }
+        );
     }
 
     private void handleMessageWithJob(BackboneSimpleWork job) {
@@ -147,8 +177,7 @@ public class BackboneVerticle extends AbstractVerticle {
         try {
             ome.model.meta.Session session = null;
             try {
-                 session = (ome.model.meta.Session)
-                        sessionManager.find(sessionKey);
+                 session = sessionManager.find(sessionKey);
             } catch (RemovedSessionException | SessionTimeoutException e) {
                 // No-op
             }
@@ -284,6 +313,89 @@ public class BackboneVerticle extends AbstractVerticle {
                             image.getPrimaryPixels().getId());
                     pixels.setImage(image);
                     return pixels;
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(job);
+    }
+
+    public void getFileAnnotation(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getAnnotations") {
+            @Transactional(readOnly = true)
+            public FileAnnotation doWork(Session session, ServiceFactory sf) {
+                try {
+                    IMetadata iMetadata = sf.getMetadataService();
+                    JsonObject data = this.getMessage().body();
+                    Set<Long> annotationIds = new HashSet<Long>();
+                    annotationIds.add(data.getLong("annotationId"));
+                    Set<Annotation> annotations = iMetadata.loadAnnotation(annotationIds);
+
+                    Iterator<Annotation> j = annotations.iterator();
+                    Annotation annotation;
+                    FileAnnotation fa;
+                    int index = 0;
+                    while (j.hasNext()) {
+                        annotation = j.next();
+                        if (annotation instanceof FileAnnotation && index == 0) {
+                            fa = (FileAnnotation) annotation;
+                            return fa;
+                        }
+                        else {
+                            message.fail(404, "Could not find annotation "
+                                    + data.getLong("annotationId").toString());
+                            index++;
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(job);
+    }
+
+    public void getFileAnnotationRaw(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getAnnotations") {
+            @Transactional(readOnly = true)
+            public byte[] doWork(Session session, ServiceFactory sf) {
+                try {
+                    IMetadata iMetadata = sf.getMetadataService();
+                    JsonObject data = this.getMessage().body();
+                    Set<Long> annotationIds = new HashSet<Long>();
+                    annotationIds.add(data.getLong("annotationId"));
+                    Set<Annotation> annotations = iMetadata.loadAnnotation(annotationIds);
+
+                    Iterator<Annotation> j = annotations.iterator();
+                    Annotation annotation;
+                    FileAnnotation fa;
+                    int index = 0;
+                    while (j.hasNext()) {
+                        annotation = j.next();
+                        if (annotation instanceof FileAnnotation && index == 0) {
+                            fa = (FileAnnotation) annotation;
+                            OriginalFile of = fa.getFile();
+                            RawFileStore store = sf.createRawFileStore();
+                            store.setFileId(of.getId());
+                            if (store.exists()) {
+                                return store.read(0, (int) store.size());
+                            }
+                            else {
+                                message.fail(404, "Could not find file for annotation "
+                                        + data.getLong("annotationId").toString());
+                            }
+                        }
+                        else {
+                            message.fail(404, "Could not find annotation "
+                                    + data.getLong("annotationId").toString());
+                            index++;
+                        }
+                    }
                 } catch (Exception e) {
                     log.error("Error retrieving data", e);
                     message.fail(500, e.getMessage());
