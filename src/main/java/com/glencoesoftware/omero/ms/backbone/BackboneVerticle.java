@@ -41,6 +41,8 @@ import ome.api.IQuery;
 import ome.api.RawFileStore;
 import ome.conditions.RemovedSessionException;
 import ome.conditions.SessionTimeoutException;
+import ome.io.nio.FileBuffer;
+import ome.io.nio.OriginalFilesService;
 import ome.model.IObject;
 import ome.model.annotations.Annotation;
 import ome.model.annotations.FileAnnotation;
@@ -53,7 +55,10 @@ import ome.services.sessions.SessionManager;
 import ome.services.util.Executor;
 import ome.system.Principal;
 import ome.system.ServiceFactory;
+import ome.util.SqlAction;
 import omero.util.IceMapper;
+
+import ome.services.blitz.repo.PublicRepositoryI;
 
 
 /**
@@ -95,6 +100,9 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_FILE_ANNOTATION_RAW_EVENT =
             "omero.get_file_annotation_raw";
 
+    public static final String GET_FILE_PATH_EVENT =
+            "omero.get_file_path";
+
 
     private final Executor executor;
 
@@ -103,9 +111,21 @@ public class BackboneVerticle extends AbstractVerticle {
     private final DetailsContextsFilter contextsFilter =
             new DetailsContextsFilter();
 
-    public BackboneVerticle(Executor executor, SessionManager sessionManager) {
+    private final PublicRepositoryI publicRespository;
+
+    private final SqlAction sqlAction;
+
+    /** Original File Service for getting paths */
+    private OriginalFilesService ioService = new OriginalFilesService("/OMERO", true);
+
+    public BackboneVerticle(Executor executor,
+            SessionManager sessionManager,
+            SqlAction sqlAction,
+            PublicRepositoryI publicRepository) {
         this.executor = executor;
         this.sessionManager = sessionManager;
+        this.sqlAction = sqlAction;
+        this.publicRespository = publicRepository;
     }
 
     @Override
@@ -162,12 +182,12 @@ public class BackboneVerticle extends AbstractVerticle {
             }
         );
         eventBus.<JsonObject>consumer(
-            GET_FILE_ANNOTATION_RAW_EVENT, new Handler<Message<JsonObject>>() {
-                public void handle(Message<JsonObject> event) {
-                    getFileAnnotationRaw(event);
-                };
-            }
-        );
+                GET_FILE_PATH_EVENT, new Handler<Message<JsonObject>>() {
+                    public void handle(Message<JsonObject> event) {
+                        getFilePath(event);
+                    };
+                }
+            );
     }
 
     private void handleMessageWithJob(BackboneSimpleWork job) {
@@ -323,6 +343,43 @@ public class BackboneVerticle extends AbstractVerticle {
         handleMessageWithJob(job);
     }
 
+    private void getFilePath(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getFilePath") {
+            @Transactional(readOnly = true)
+            public String doWork(Session session, ServiceFactory sf) {
+                try {
+                    JsonObject data = this.getMessage().body();
+                    IQuery iQuery = sf.getQueryService();
+                    OriginalFile of = null;
+                    if (data.getString("type").equals("FileAnnotation")) {
+                        FileAnnotation fa = iQuery.get(FileAnnotation.class, data.getLong("id"));
+                        of = iQuery.get(OriginalFile.class, fa.getFile().getId());
+                    } else {
+                        of = iQuery.get(OriginalFile.class, data.getLong("id"));
+                    }
+                    if (of.getRepo() == null) {
+                        FileBuffer fBuffer = ioService.getFileBuffer(of, "r");
+                        log.info(fBuffer.getPath());
+                        return fBuffer.getPath();
+                    } else {
+                        String repoPath = sqlAction.findRepoFilePath(of.getRepo(), of.getId());
+                        log.info(repoPath);
+                        return repoPath;
+                    }
+                    /*
+                    RawFileStore store = sf.createRawFileStore();
+                    store.setFileId(of.getId());
+                    */
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(job);
+    }
+
     public void getFileAnnotation(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getAnnotations") {
             @Transactional(readOnly = true)
@@ -359,51 +416,4 @@ public class BackboneVerticle extends AbstractVerticle {
         };
         handleMessageWithJob(job);
     }
-
-    public void getFileAnnotationRaw(Message<JsonObject> message) {
-        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getAnnotations") {
-            @Transactional(readOnly = true)
-            public byte[] doWork(Session session, ServiceFactory sf) {
-                try {
-                    IMetadata iMetadata = sf.getMetadataService();
-                    JsonObject data = this.getMessage().body();
-                    Set<Long> annotationIds = new HashSet<Long>();
-                    annotationIds.add(data.getLong("annotationId"));
-                    Set<Annotation> annotations = iMetadata.loadAnnotation(annotationIds);
-
-                    Iterator<Annotation> j = annotations.iterator();
-                    Annotation annotation;
-                    FileAnnotation fa;
-                    int index = 0;
-                    while (j.hasNext()) {
-                        annotation = j.next();
-                        if (annotation instanceof FileAnnotation && index == 0) {
-                            fa = (FileAnnotation) annotation;
-                            OriginalFile of = fa.getFile();
-                            RawFileStore store = sf.createRawFileStore();
-                            store.setFileId(of.getId());
-                            if (store.exists()) {
-                                return store.read(0, (int) store.size());
-                            }
-                            else {
-                                message.fail(404, "Could not find file for annotation "
-                                        + data.getLong("annotationId").toString());
-                            }
-                        }
-                        else {
-                            message.fail(404, "Could not find annotation "
-                                    + data.getLong("annotationId").toString());
-                            index++;
-                        }
-                    }
-                } catch (Exception e) {
-                    log.error("Error retrieving data", e);
-                    message.fail(500, e.getMessage());
-                }
-                return null;
-            }
-        };
-        handleMessageWithJob(job);
-    }
-
 }
