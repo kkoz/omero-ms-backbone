@@ -111,7 +111,7 @@ public class BackboneVerticle extends AbstractVerticle {
     private final DetailsContextsFilter contextsFilter =
             new DetailsContextsFilter();
 
-    private final PublicRepositoryI publicRespository;
+    private final PublicRepositoryI publicRepository;
 
     private final SqlAction sqlAction;
 
@@ -125,7 +125,7 @@ public class BackboneVerticle extends AbstractVerticle {
         this.executor = executor;
         this.sessionManager = sessionManager;
         this.sqlAction = sqlAction;
-        this.publicRespository = publicRepository;
+        this.publicRepository = publicRepository;
     }
 
     @Override
