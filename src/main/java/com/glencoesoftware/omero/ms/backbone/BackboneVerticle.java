@@ -353,7 +353,7 @@ public class BackboneVerticle extends AbstractVerticle {
                     OriginalFile of = null;
                     if (data.getString("type").equals("FileAnnotation")) {
                         FileAnnotation fa = iQuery.get(FileAnnotation.class, data.getLong("id"));
-                        of = iQuery.get(OriginalFile.class, fa.getFile().getId());
+                        of = fa.getFile();
                     } else {
                         of = iQuery.get(OriginalFile.class, data.getLong("id"));
                     }
