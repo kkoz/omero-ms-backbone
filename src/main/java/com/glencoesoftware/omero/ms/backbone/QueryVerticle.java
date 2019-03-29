@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.eventbus.ReplyException;
 import io.vertx.core.http.HttpServer;
@@ -37,8 +38,12 @@ import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonObject;
+import io.vertx.ext.healthchecks.HealthCheckHandler;
+import io.vertx.ext.healthchecks.HealthChecks;
+import io.vertx.ext.healthchecks.Status;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
+import io.vertx.spi.cluster.hazelcast.ClusterHealthCheck;
 import ome.model.annotations.FileAnnotation;
 import ome.model.core.Image;
 import ome.model.core.Pixels;
@@ -84,13 +89,20 @@ public class QueryVerticle extends AbstractVerticle {
             .handler(this::getPixels);
 
         router.get("/api/:sessionKey/getFileAnnotation/:annotationId")
-        .handler(this::getFileAnnotation);
+            .handler(this::getFileAnnotation);
 
         router.get("/api/:sessionKey/getFilePath/:annotationId")
-        .handler(this::getFilePath);
+            .handler(this::getFilePath);
 
         router.get("/api/:sessionKey/getFilePathOriginalFile/:fileId")
-        .handler(this::getFilePathOriginalFile);
+            .handler(this::getFilePathOriginalFile);
+
+        Handler<Future<Status>> procedure =
+                ClusterHealthCheck.createProcedure(vertx);
+        HealthChecks checks =
+                HealthChecks.create(vertx).register("cluster-health", procedure);
+        router.get("/readiness")
+            .handler(HealthCheckHandler.createWithHealthChecks(checks));
 
         int port = 9090;  // FIXME
         log.info("Starting HTTP server *:{}", port);
