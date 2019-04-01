@@ -21,6 +21,7 @@
     <constructor-arg ref="executor"/>
     <constructor-arg ref="sessionManager"/>
     <constructor-arg ref="simpleSqlAction"/>
+    <constructor-arg ref="/OMERO/Files"/>
     <constructor-arg ref="managedRepository"/>
     <constructor-arg value="${omero.fs.repo.path_rules}"/>
   </bean>

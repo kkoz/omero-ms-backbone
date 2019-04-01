@@ -120,17 +120,19 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private final FilePathRestrictions filePathRestrictions;
 
-    /** Original File Service for getting paths from the main repository */
-    private OriginalFilesService ioService = new OriginalFilesService("/OMERO", true);
+    /** Original file service for getting paths from the main repository */
+    private final OriginalFilesService originalFilesService;
 
     public BackboneVerticle(Executor executor,
             SessionManager sessionManager,
             SqlAction sqlAction,
+            OriginalFilesService originalFilesService,
             LegacyRepositoryI managedRepository,
             String pathRules) {
         this.executor = executor;
         this.sessionManager = sessionManager;
         this.sqlAction = sqlAction;
+        this.originalFilesService = originalFilesService;
         this.managedRepository = managedRepository;
 
         // File path restriction creation cribbed from PublicRepositoryI
@@ -383,7 +385,7 @@ public class BackboneVerticle extends AbstractVerticle {
                         of = iQuery.get(OriginalFile.class, data.getLong("id"));
                     }
                     if (of.getRepo() == null) {
-                        return ioService.getFilesPath(of.getId());
+                        return originalFilesService.getFilesPath(of.getId());
                     } else {
                         FsFile fsFile = new FsFile(sqlAction.findRepoFilePath(
                                 of.getRepo(), of.getId()));
