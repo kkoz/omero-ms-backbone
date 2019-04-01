@@ -26,6 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
+import org.apache.commons.lang.StringUtils;
 import org.hibernate.Session;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,10 +39,8 @@ import io.vertx.core.json.JsonObject;
 import ome.api.IMetadata;
 import ome.api.IPixels;
 import ome.api.IQuery;
-import ome.api.RawFileStore;
 import ome.conditions.RemovedSessionException;
 import ome.conditions.SessionTimeoutException;
-import ome.io.nio.FileBuffer;
 import ome.io.nio.OriginalFilesService;
 import ome.model.IObject;
 import ome.model.annotations.Annotation;
@@ -57,8 +56,13 @@ import ome.system.Principal;
 import ome.system.ServiceFactory;
 import ome.util.SqlAction;
 import omero.util.IceMapper;
-
-import ome.services.blitz.repo.PublicRepositoryI;
+import ome.services.blitz.repo.FileMaker;
+import ome.services.blitz.repo.LegacyRepositoryI;
+import ome.services.blitz.repo.path.FilePathRestrictionInstance;
+import ome.services.blitz.repo.path.FilePathRestrictions;
+import ome.services.blitz.repo.path.FsFile;
+import ome.services.blitz.repo.path.MakePathComponentSafe;
+import ome.services.blitz.repo.path.ServerFilePathTransformer;
 
 
 /**
@@ -103,7 +107,6 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_FILE_PATH_EVENT =
             "omero.get_file_path";
 
-
     private final Executor executor;
 
     private final SessionManager sessionManager;
@@ -111,21 +114,42 @@ public class BackboneVerticle extends AbstractVerticle {
     private final DetailsContextsFilter contextsFilter =
             new DetailsContextsFilter();
 
-    private final PublicRepositoryI publicRepository;
+    private final LegacyRepositoryI managedRepository;
 
     private final SqlAction sqlAction;
 
-    /** Original File Service for getting paths */
+    private final FilePathRestrictions filePathRestrictions;
+
+    /** Original File Service for getting paths from the main repository */
     private OriginalFilesService ioService = new OriginalFilesService("/OMERO", true);
 
     public BackboneVerticle(Executor executor,
             SessionManager sessionManager,
             SqlAction sqlAction,
-            PublicRepositoryI publicRepository) {
+            LegacyRepositoryI managedRepository,
+            String pathRules) {
         this.executor = executor;
         this.sessionManager = sessionManager;
         this.sqlAction = sqlAction;
-        this.publicRepository = publicRepository;
+        this.managedRepository = managedRepository;
+
+        // File path restriction creation cribbed from PublicRepositoryI
+        // constructor
+        final Set<String> terms = new HashSet<String>();
+        for (final String term : pathRules.split(",")) {
+            if (StringUtils.isNotBlank(term)) {
+                terms.add(term.trim());
+            }
+        }
+        final String[] termArray = terms.toArray(new String[terms.size()]);
+        try {
+            this.filePathRestrictions =
+                    FilePathRestrictionInstance.getFilePathRestrictions(
+                            termArray);
+        } catch (NullPointerException e) {
+            throw new IllegalArgumentException(
+                    "unknown rule set named in: " + pathRules);
+        }
     }
 
     @Override
@@ -352,24 +376,47 @@ public class BackboneVerticle extends AbstractVerticle {
                     IQuery iQuery = sf.getQueryService();
                     OriginalFile of = null;
                     if (data.getString("type").equals("FileAnnotation")) {
-                        FileAnnotation fa = iQuery.get(FileAnnotation.class, data.getLong("id"));
+                        FileAnnotation fa = iQuery.get(
+                                FileAnnotation.class, data.getLong("id"));
                         of = fa.getFile();
                     } else {
                         of = iQuery.get(OriginalFile.class, data.getLong("id"));
                     }
                     if (of.getRepo() == null) {
-                        FileBuffer fBuffer = ioService.getFileBuffer(of, "r");
-                        log.info(fBuffer.getPath());
-                        return fBuffer.getPath();
+                        return ioService.getFilesPath(of.getId());
                     } else {
-                        String repoPath = sqlAction.findRepoFilePath(of.getRepo(), of.getId());
-                        log.info(repoPath);
-                        return repoPath;
+                        FsFile fsFile = new FsFile(sqlAction.findRepoFilePath(
+                                of.getRepo(), of.getId()));
+                        // (1) Get the repository root from the managed
+                        //     repository description like in client code
+                        omero.model.OriginalFile description =
+                                managedRepository.getDescription();
+                        String root = description.getPath().getValue() +
+                                      description.getName().getValue();
+                        // (2) Create a FileMaker like in the LegacyRepositoryI
+                        //     constructors which directly initialize the
+                        //     ManagedRepositoryI servant (a subclass of
+                        //     PublicRepositoryI) with this instance
+                        FileMaker fileMaker = new FileMaker(root);
+                        // (3) Prepare a file path transformer as in
+                        //     PublicRepositoryI#initialize() used by
+                        //     PublicRepository#checkId() and by extension
+                        //     the CheckedPath constructor which is the final
+                        //     implementation we wish to mimic
+                        ServerFilePathTransformer serverPaths =
+                                new ServerFilePathTransformer();
+                        serverPaths.setBaseDirFile(
+                                new File(fileMaker.getDir()));
+                        serverPaths.setPathSanitizer(new MakePathComponentSafe(
+                                filePathRestrictions));
+                        if (!serverPaths.isLegalFsFile(fsFile)) {
+                            message.fail(
+                                404, "Illegal path: " + fsFile.toString());
+                            return null;
+                        }
+                        return serverPaths.getServerFileFromFsFile(fsFile)
+                            .getAbsolutePath();
                     }
-                    /*
-                    RawFileStore store = sf.createRawFileStore();
-                    store.setFileId(of.getId());
-                    */
                 } catch (Exception e) {
                     log.error("Error retrieving data", e);
                     message.fail(500, e.getMessage());
