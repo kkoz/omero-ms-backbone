@@ -97,6 +97,9 @@ public class QueryVerticle extends AbstractVerticle {
         router.get("/api/:sessionKey/getFilePathOriginalFile/:fileId")
             .handler(this::getFilePathOriginalFile);
 
+        router.get("/api/:sessionKey/getOriginalFile/:fileId")
+            .handler(this::getOriginalFile);
+
         Handler<Future<Status>> procedure =
                 ClusterHealthCheck.createProcedure(vertx);
         HealthChecks checks =
@@ -405,6 +408,41 @@ public class QueryVerticle extends AbstractVerticle {
                 log.error("Exception while decoding object in response", e);
             } finally {
                 response.end(s);
+            }
+        });
+    }
+
+    private void getOriginalFile(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        Long fileId = Long.parseLong(request.params().get("fileId"));
+        log.debug("Image ID: {}", fileId);
+
+        final JsonObject data = new JsonObject();
+        data.put("sessionKey", sessionKey);
+        data.put("id", fileId);
+        data.put("type", "OriginalFile");
+        vertx.eventBus().<byte[]>send(
+                BackboneVerticle.GET_FILE_PATH_EVENT, data, result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    ifFailed(response, result);
+                    return;
+                }
+                s = deserialize(result);
+                log.debug("Response ended");
+                String filename = s.split("/")[s.split("/").length - 1];
+                response.headers().set("Content-Type", "application/octet-stream");
+                response.headers().set("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+                response.sendFile(s);
+            } catch (IOException | ClassNotFoundException e) {
+                log.error("Exception while decoding object in response", e);
+                response.end("Error");
+            } finally {
+                //response.end(s);
             }
         });
     }
