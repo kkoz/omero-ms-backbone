@@ -19,9 +19,14 @@
 package com.glencoesoftware.omero.ms.backbone;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.ObjectOutputStream;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
+import org.apache.commons.lang.StringUtils;
 import org.hibernate.Session;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,12 +36,17 @@ import io.vertx.core.Handler;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
+import ome.api.IMetadata;
 import ome.api.IPixels;
 import ome.api.IQuery;
 import ome.conditions.RemovedSessionException;
 import ome.conditions.SessionTimeoutException;
+import ome.io.nio.OriginalFilesService;
 import ome.model.IObject;
+import ome.model.annotations.Annotation;
+import ome.model.annotations.FileAnnotation;
 import ome.model.core.Image;
+import ome.model.core.OriginalFile;
 import ome.model.core.Pixels;
 import ome.model.display.RenderingDef;
 import ome.parameters.Parameters;
@@ -44,7 +54,15 @@ import ome.services.sessions.SessionManager;
 import ome.services.util.Executor;
 import ome.system.Principal;
 import ome.system.ServiceFactory;
+import ome.util.SqlAction;
 import omero.util.IceMapper;
+import ome.services.blitz.repo.FileMaker;
+import ome.services.blitz.repo.LegacyRepositoryI;
+import ome.services.blitz.repo.path.FilePathRestrictionInstance;
+import ome.services.blitz.repo.path.FilePathRestrictions;
+import ome.services.blitz.repo.path.FsFile;
+import ome.services.blitz.repo.path.MakePathComponentSafe;
+import ome.services.blitz.repo.path.ServerFilePathTransformer;
 
 
 /**
@@ -80,6 +98,9 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_PIXELS_DESCRIPTION_EVENT =
             "omero.get_pixels_description";
 
+    public static final String GET_FILE_PATH_EVENT =
+            "omero.get_file_path";
+
     private final Executor executor;
 
     private final SessionManager sessionManager;
@@ -87,9 +108,44 @@ public class BackboneVerticle extends AbstractVerticle {
     private final DetailsContextsFilter contextsFilter =
             new DetailsContextsFilter();
 
-    public BackboneVerticle(Executor executor, SessionManager sessionManager) {
+    private final LegacyRepositoryI managedRepository;
+
+    private final SqlAction sqlAction;
+
+    private final FilePathRestrictions filePathRestrictions;
+
+    /** Original file service for getting paths from the main repository */
+    private final OriginalFilesService originalFilesService;
+
+    public BackboneVerticle(Executor executor,
+            SessionManager sessionManager,
+            SqlAction sqlAction,
+            OriginalFilesService originalFilesService,
+            LegacyRepositoryI managedRepository,
+            String pathRules) {
         this.executor = executor;
         this.sessionManager = sessionManager;
+        this.sqlAction = sqlAction;
+        this.originalFilesService = originalFilesService;
+        this.managedRepository = managedRepository;
+
+        // File path restriction creation cribbed from PublicRepositoryI
+        // constructor
+        final Set<String> terms = new HashSet<String>();
+        for (final String term : pathRules.split(",")) {
+            if (StringUtils.isNotBlank(term)) {
+                terms.add(term.trim());
+            }
+        }
+        final String[] termArray = terms.toArray(new String[terms.size()]);
+        try {
+            this.filePathRestrictions =
+                    FilePathRestrictionInstance.getFilePathRestrictions(
+                            termArray);
+        } catch (NullPointerException e) {
+            throw new IllegalArgumentException(
+                    "unknown rule set named in: " + pathRules);
+        }
     }
 
     @Override
@@ -138,6 +194,13 @@ public class BackboneVerticle extends AbstractVerticle {
                 };
             }
         );
+        eventBus.<JsonObject>consumer(
+                GET_FILE_PATH_EVENT, new Handler<Message<JsonObject>>() {
+                    public void handle(Message<JsonObject> event) {
+                        getFilePath(event);
+                    };
+                }
+            );
     }
 
     private void handleMessageWithJob(BackboneSimpleWork job) {
@@ -147,8 +210,7 @@ public class BackboneVerticle extends AbstractVerticle {
         try {
             ome.model.meta.Session session = null;
             try {
-                 session = (ome.model.meta.Session)
-                        sessionManager.find(sessionKey);
+                 session = sessionManager.find(sessionKey);
             } catch (RemovedSessionException | SessionTimeoutException e) {
                 // No-op
             }
@@ -284,6 +346,66 @@ public class BackboneVerticle extends AbstractVerticle {
                             image.getPrimaryPixels().getId());
                     pixels.setImage(image);
                     return pixels;
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(job);
+    }
+
+    private void getFilePath(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getFilePath") {
+            @Transactional(readOnly = true)
+            public String doWork(Session session, ServiceFactory sf) {
+                try {
+                    JsonObject data = this.getMessage().body();
+                    IQuery iQuery = sf.getQueryService();
+                    OriginalFile of = null;
+                    if (data.getString("type").equals("FileAnnotation")) {
+                        FileAnnotation fa = iQuery.get(
+                                FileAnnotation.class, data.getLong("id"));
+                        of = fa.getFile();
+                    } else {
+                        of = iQuery.get(OriginalFile.class, data.getLong("id"));
+                    }
+                    if (of.getRepo() == null) {
+                        return originalFilesService.getFilesPath(of.getId());
+                    } else {
+                        FsFile fsFile = new FsFile(sqlAction.findRepoFilePath(
+                                of.getRepo(), of.getId()));
+                        // (1) Get the repository root from the managed
+                        //     repository description like in client code
+                        omero.model.OriginalFile description =
+                                managedRepository.getDescription();
+                        String root = description.getPath().getValue() +
+                                      description.getName().getValue();
+                        // (2) Create a FileMaker like in the LegacyRepositoryI
+                        //     constructors which directly initialize the
+                        //     ManagedRepositoryI servant (a subclass of
+                        //     PublicRepositoryI) with this instance
+                        FileMaker fileMaker = new FileMaker(root);
+                        // (3) Prepare a file path transformer as in
+                        //     PublicRepositoryI#initialize() used by
+                        //     PublicRepository#checkId() and by extension
+                        //     the CheckedPath constructor which is the final
+                        //     implementation we wish to mimic
+                        ServerFilePathTransformer serverPaths =
+                                new ServerFilePathTransformer();
+                        serverPaths.setBaseDirFile(
+                                new File(fileMaker.getDir()));
+                        serverPaths.setPathSanitizer(new MakePathComponentSafe(
+                                filePathRestrictions));
+                        if (!serverPaths.isLegalFsFile(fsFile)) {
+                            message.fail(
+                                404, "Illegal path: " + fsFile.toString());
+                            return null;
+                        }
+                        return serverPaths.getServerFileFromFsFile(fsFile)
+                            .getAbsolutePath();
+                    }
                 } catch (Exception e) {
                     log.error("Error retrieving data", e);
                     message.fail(500, e.getMessage());
