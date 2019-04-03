@@ -24,11 +24,11 @@ import java.util.List;
 
 import org.hibernate.Session;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationContext;
 import org.springframework.transaction.annotation.Transactional;
 
 import io.vertx.core.AbstractVerticle;
-import io.vertx.core.Future;
+import io.vertx.core.Handler;
+import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
 import ome.api.IPixels;
@@ -49,6 +49,11 @@ import omero.util.IceMapper;
 
 /**
  * Main entry point for the OMERO microservice architecture backbone verticle.
+ * <b>NOTE:</b> As this verticle is being instantiated by Spring 3 inside the
+ * OMERO server it <b>CANNOT</b> contain any Java 8+ lambda expressions in
+ * directly accessible code paths.  If you are seeing
+ * {@link ArrayIndexOutOfBoundsException}'s thrown from Spring ASM during bean
+ * instantiation, check for lambda expressions.
  * @author Chris Allan <callan@glencoesoftware.com>
  *
  */
@@ -75,9 +80,6 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_PIXELS_DESCRIPTION_EVENT =
             "omero.get_pixels_description";
 
-    /** OMERO server Spring application context. */
-    private ApplicationContext context;
-
     private final Executor executor;
 
     private final SessionManager sessionManager;
@@ -85,31 +87,57 @@ public class BackboneVerticle extends AbstractVerticle {
     private final DetailsContextsFilter contextsFilter =
             new DetailsContextsFilter();
 
-    BackboneVerticle(Executor executor, SessionManager sessionManager) {
+    public BackboneVerticle(Executor executor, SessionManager sessionManager) {
         this.executor = executor;
         this.sessionManager = sessionManager;
     }
 
-    /**
-     * Entry point method which starts the server event loop.
-     * @param args Command line arguments.
-     */
     @Override
-    public void start(Future<Void> future) {
-        log.info("Starting verticle");
+    public void start() {
+        EventBus eventBus = vertx.eventBus();
 
-        vertx.eventBus().<String>consumer(
-                IS_SESSION_VALID_EVENT, this::isSessionValid);
-        vertx.eventBus().<JsonObject>consumer(
-                CAN_READ_EVENT, this::canRead);
-        vertx.eventBus().<JsonObject>consumer(
-                GET_OBJECT_EVENT, this::getObject);
-        vertx.eventBus().<JsonObject>consumer(
-                GET_ALL_ENUMERATIONS_EVENT, this::getAllEnumerations);
-        vertx.eventBus().<JsonObject>consumer(
-                GET_RENDERING_SETTINGS_EVENT, this::getRenderingSettings);
-        vertx.eventBus().<JsonObject>consumer(
-                GET_PIXELS_DESCRIPTION_EVENT, this::getPixelsDescription);
+        eventBus.<JsonObject>consumer(
+            IS_SESSION_VALID_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    isSessionValid(event);
+                };
+            }
+        );
+        eventBus.<JsonObject>consumer(
+            CAN_READ_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    canRead(event);
+                };
+            }
+        );
+        eventBus.<JsonObject>consumer(
+            GET_OBJECT_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    getObject(event);
+                };
+            }
+        );
+        eventBus.<JsonObject>consumer(
+            GET_ALL_ENUMERATIONS_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    getAllEnumerations(event);
+                };
+            }
+        );
+        eventBus.<JsonObject>consumer(
+            GET_RENDERING_SETTINGS_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    getRenderingSettings(event);
+                };
+            }
+        );
+        eventBus.<JsonObject>consumer(
+            GET_PIXELS_DESCRIPTION_EVENT, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    getPixelsDescription(event);
+                };
+            }
+        );
     }
 
     private void handleMessageWithJob(BackboneSimpleWork job) {
@@ -146,9 +174,8 @@ public class BackboneVerticle extends AbstractVerticle {
         }
     }
 
-    private void isSessionValid(Message<String> message) {
-        String sessionKey =
-                new JsonObject(message.body()).getString("sessionKey");
+    private void isSessionValid(Message<JsonObject> message) {
+        String sessionKey = message.body().getString("sessionKey");
         try {
             message.reply(new Boolean(sessionManager.find(sessionKey) != null));
         } catch (Exception e) {

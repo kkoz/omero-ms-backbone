@@ -27,7 +27,9 @@ import java.util.Map;
 import org.slf4j.LoggerFactory;
 
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
+import io.vertx.core.eventbus.Message;
 import io.vertx.core.eventbus.ReplyException;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerRequest;
@@ -36,7 +38,6 @@ import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
-import io.vertx.ext.web.handler.CookieHandler;
 import ome.model.core.Image;
 import ome.model.core.Pixels;
 
@@ -60,9 +61,6 @@ public class QueryVerticle extends AbstractVerticle {
         log.info("Starting verticle");
         HttpServer server = vertx.createHttpServer();
         Router router = Router.router(vertx);
-
-        // Cookie handler so we can pick up the OMERO.web session
-        router.route().handler(CookieHandler.create());
 
         // Thumbnail request handlers
         router.get("/api/:sessionKey/isSessionValid")
@@ -94,6 +92,25 @@ public class QueryVerticle extends AbstractVerticle {
         });
     }
 
+    private <T> void ifFailed(
+            HttpServerResponse response, AsyncResult<Message<T>> result) {
+        Throwable t = result.cause();
+        int statusCode = 404;
+        if (t instanceof ReplyException) {
+            statusCode = ((ReplyException) t).failureCode();
+        }
+        log.error("Request failed", t);
+        response.setStatusCode(statusCode);
+    }
+
+    private <T> T deserialize(AsyncResult<Message<byte[]>> result)
+            throws IOException, ClassNotFoundException {
+        ByteArrayInputStream bais =
+                new ByteArrayInputStream(result.result().body());
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        return (T) ois.readObject();
+    }
+
     private void isSessionValid(RoutingContext event) {
         final HttpServerRequest request = event.request();
         final HttpServerResponse response = event.response();
@@ -107,13 +124,7 @@ public class QueryVerticle extends AbstractVerticle {
             String s = "";
             try {
                 if (result.failed()) {
-                    Throwable t = result.cause();
-                    int statusCode = 404;
-                    if (t instanceof ReplyException) {
-                        statusCode = ((ReplyException) t).failureCode();
-                    }
-                    log.error("Request failed", t);
-                    response.setStatusCode(statusCode);
+                    ifFailed(response, result);
                     return;
                 }
                 response.headers().set("Content-Type", "text/plain");
@@ -143,13 +154,7 @@ public class QueryVerticle extends AbstractVerticle {
             String s = "";
             try {
                 if (result.failed()) {
-                    Throwable t = result.cause();
-                    int statusCode = 404;
-                    if (t instanceof ReplyException) {
-                        statusCode = ((ReplyException) t).failureCode();
-                    }
-                    log.error("Request failed", t);
-                    response.setStatusCode(statusCode);
+                    ifFailed(response, result);
                     return;
                 }
                 response.headers().set("Content-Type", "text/plain");
@@ -179,20 +184,11 @@ public class QueryVerticle extends AbstractVerticle {
             String s = "";
             try {
                 if (result.failed()) {
-                    Throwable t = result.cause();
-                    int statusCode = 404;
-                    if (t instanceof ReplyException) {
-                        statusCode = ((ReplyException) t).failureCode();
-                    }
-                    log.error("Request failed", t);
-                    response.setStatusCode(statusCode);
+                    ifFailed(response, result);
                     return;
                 }
                 response.headers().set("Content-Type", "text/plain");
-                ByteArrayInputStream bais =
-                        new ByteArrayInputStream(result.result().body());
-                ObjectInputStream ois = new ObjectInputStream(bais);
-                s = ois.readObject().toString();
+                s = deserialize(result).toString();
             } catch (IOException | ClassNotFoundException e) {
                 log.error("Exception while decoding object in response", e);
             } finally {
@@ -218,20 +214,11 @@ public class QueryVerticle extends AbstractVerticle {
             String s = "";
             try {
                 if (result.failed()) {
-                    Throwable t = result.cause();
-                    int statusCode = 404;
-                    if (t instanceof ReplyException) {
-                        statusCode = ((ReplyException) t).failureCode();
-                    }
-                    log.error("Request failed", t);
-                    response.setStatusCode(statusCode);
+                    ifFailed(response, result);
                     return;
                 }
                 response.headers().set("Content-Type", "text/plain");
-                ByteArrayInputStream bais =
-                        new ByteArrayInputStream(result.result().body());
-                ObjectInputStream ois = new ObjectInputStream(bais);
-                s = ois.readObject().toString();
+                s = deserialize(result).toString();
             } catch (IOException | ClassNotFoundException e) {
                 log.error("Exception while decoding object in response", e);
             } finally {
@@ -258,20 +245,11 @@ public class QueryVerticle extends AbstractVerticle {
             String s = "";
             try {
                 if (result.failed()) {
-                    Throwable t = result.cause();
-                    int statusCode = 404;
-                    if (t instanceof ReplyException) {
-                        statusCode = ((ReplyException) t).failureCode();
-                    }
-                    log.error("Request failed", t);
-                    response.setStatusCode(statusCode);
+                    ifFailed(response, result);
                     return;
                 }
                 response.headers().set("Content-Type", "text/plain");
-                ByteArrayInputStream bais =
-                        new ByteArrayInputStream(result.result().body());
-                ObjectInputStream ois = new ObjectInputStream(bais);
-                s = ois.readObject().toString();
+                s = deserialize(result).toString();
             } catch (IOException | ClassNotFoundException e) {
                 log.error("Exception while decoding object in response", e);
             } finally {
@@ -297,20 +275,11 @@ public class QueryVerticle extends AbstractVerticle {
             String s = "";
             try {
                 if (result.failed()) {
-                    Throwable t = result.cause();
-                    int statusCode = 404;
-                    if (t instanceof ReplyException) {
-                        statusCode = ((ReplyException) t).failureCode();
-                    }
-                    log.error("Request failed", t);
-                    response.setStatusCode(statusCode);
+                    ifFailed(response, result);
                     return;
                 }
                 response.headers().set("Content-Type", "text/plain");
-                ByteArrayInputStream bais =
-                        new ByteArrayInputStream(result.result().body());
-                ObjectInputStream ois = new ObjectInputStream(bais);
-                Pixels pixels = (Pixels) ois.readObject();
+                Pixels pixels = deserialize(result);
                 Image image = pixels.getImage();
                 s = String.format(
                         "%s;%s;Series:%s", pixels, image, image.getSeries());

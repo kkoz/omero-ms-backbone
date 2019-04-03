@@ -6,10 +6,20 @@
         Defines the beans for microservices.
   </description>
 
-  <bean name="omero-ms-backbone" class="com.glencoesoftware.omero.ms.backbone.BackboneService">
+  <bean id="omero-ms-backbone-verticlefactory"
+        class="com.glencoesoftware.omero.ms.backbone.OmeroVerticleFactory"/>
+
+  <bean id="omero-ms-backbone"
+        class="com.glencoesoftware.omero.ms.backbone.BackboneService">
+    <constructor-arg ref="preferenceContext"/>
+    <constructor-arg ref="omero-ms-backbone-verticlefactory"/>
+  </bean>
+
+  <bean id="omero-ms-backbone-verticle"
+        class="com.glencoesoftware.omero.ms.backbone.BackboneVerticle"
+        singleton="false">
     <constructor-arg ref="executor"/>
     <constructor-arg ref="sessionManager"/>
-    <constructor-arg ref="preferenceContext"/>
   </bean>
 
 </beans>

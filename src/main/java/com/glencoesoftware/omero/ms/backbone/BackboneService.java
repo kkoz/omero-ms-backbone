@@ -31,18 +31,23 @@ import com.hazelcast.config.Config;
 import com.hazelcast.config.XmlConfigBuilder;
 
 import io.vertx.core.AsyncResult;
+import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
+import io.vertx.core.spi.VerticleFactory;
 import io.vertx.core.spi.cluster.ClusterManager;
 import io.vertx.spi.cluster.hazelcast.HazelcastClusterManager;
-import ome.services.sessions.SessionManager;
-import ome.services.util.Executor;
 import ome.system.PreferenceContext;
 
 
 /**
  * Main entry point for the OMERO microservice architecture backbone verticle.
+ * <b>NOTE:</b> As this verticle is being instantiated by Spring 3 inside the
+ * OMERO server it <b>CANNOT</b> contain any Java 8+ lambda expressions in
+ * directly accessible code paths.  If you are seeing
+ * {@link ArrayIndexOutOfBoundsException}'s thrown from Spring ASM during bean
+ * instantiation, check for lambda expressions.
  * @author Chris Allan <callan@glencoesoftware.com>
  *
  */
@@ -51,22 +56,26 @@ public class BackboneService {
     private static final org.slf4j.Logger log =
             LoggerFactory.getLogger(BackboneService.class);
 
-    private final BackboneVerticle backboneVerticle;
+    public final static int DEFAULT_WORKER_POOL_SIZE =
+            Runtime.getRuntime().availableProcessors() * 2;
 
-    private final Executor executor;
-
-    private final SessionManager sessionManager;
-
-    BackboneService(Executor executor, SessionManager sessionManager,
-                    PreferenceContext preferenceContext) {
-        this.executor = executor;
-        this.sessionManager = sessionManager;
+    BackboneService(PreferenceContext preferenceContext,
+                    VerticleFactory verticleFactory) {
         String clusterHost = Optional.ofNullable(preferenceContext.getProperty(
             "omero.ms.backbone.cluster_host"
         )).orElse(VertxOptions.DEFAULT_CLUSTER_HOST);
+        int workerPoolSize = Integer.parseInt(Optional.ofNullable(
+            preferenceContext.getProperty("omero.ms.backbone.worker_pool_size")
+        ).orElse(Integer.toString(DEFAULT_WORKER_POOL_SIZE)));
 
-        log.debug("Initializing Backbone -- cluster host {}", clusterHost);
-        backboneVerticle = new BackboneVerticle(executor, sessionManager);
+        log.debug(
+            "Initializing Backbone -- cluster host {} worker pool size {}",
+            clusterHost, workerPoolSize
+        );
+        DeploymentOptions verticleOptions = new DeploymentOptions()
+                .setWorker(true)
+                .setInstances(workerPoolSize)
+                .setWorkerPoolSize(workerPoolSize);
 
         Config hazelcastConfig = getHazelcastConfig();
         hazelcastConfig.setProperty("hazelcast.logging.type", "slf4j");
@@ -80,7 +89,17 @@ public class BackboneService {
             public void handle(AsyncResult<Vertx> event) {
                 if (event.succeeded()) {
                     Vertx vertx = event.result();
-                    vertx.deployVerticle(backboneVerticle);
+                    vertx.registerVerticleFactory(verticleFactory);
+                    vertx.deployVerticle(
+                            "omero:omero-ms-backbone-verticle",
+                            verticleOptions, res -> {
+                        if (res.failed()) {
+                            log.error(
+                                "Failure deploying verticle", res.cause());
+                        } else {
+                            log.debug("Succeeded in deploying verticle");
+                        }
+                    });
                 } else {
                     log.error("Failed to start Hazelcast clustered Vert.x");
                 }

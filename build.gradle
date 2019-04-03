@@ -31,8 +31,8 @@ configurations.all {
 }
 
 dependencies {
-    compile 'io.vertx:vertx-web:3.5.3'
-    compile 'io.vertx:vertx-hazelcast:3.5.3'
+    compile 'io.vertx:vertx-web:3.6.3'
+    compile 'io.vertx:vertx-hazelcast:3.6.3'
     compileOnly('omero:blitz:5.4.10-ice36-b105') {
         exclude group: 'org.testng', module: 'testng'
     }
