@@ -88,9 +88,6 @@ public class QueryVerticle extends AbstractVerticle {
         router.get("/api/:sessionKey/getPixelsDescription/:imageId")
             .handler(this::getPixels);
 
-        router.get("/api/:sessionKey/getFileAnnotation/:annotationId")
-            .handler(this::getFileAnnotation);
-
         router.get("/api/:sessionKey/getFilePath/:annotationId")
             .handler(this::getFilePath);
 
@@ -309,38 +306,6 @@ public class QueryVerticle extends AbstractVerticle {
                 Image image = pixels.getImage();
                 s = String.format(
                         "%s;%s;Series:%s", pixels, image, image.getSeries());
-            } catch (IOException | ClassNotFoundException e) {
-                log.error("Exception while decoding object in response", e);
-            } finally {
-                response.end(s);
-                log.debug("Response ended");
-            }
-        });
-    }
-
-    private void getFileAnnotation(RoutingContext event) {
-        final HttpServerRequest request = event.request();
-        final HttpServerResponse response = event.response();
-        String sessionKey = request.params().get("sessionKey");
-        log.debug("Session key: " + sessionKey);
-        Long annotationId = Long.parseLong(request.params().get("annotationId"));
-        log.debug("Image ID: {}", annotationId);
-
-        final JsonObject data = new JsonObject();
-        data.put("sessionKey", sessionKey);
-        data.put("annotationId", annotationId);
-        vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_FILE_ANNOTATION_EVENT, data, result -> {
-            String s = "";
-            try {
-                if (result.failed()) {
-                    ifFailed(response, result);
-                    return;
-                }
-                response.headers().set("Content-Type", "text/plain");
-                FileAnnotation fileAnnotation = deserialize(result);
-                s = String.format(
-                        "%s;%s;", fileAnnotation, fileAnnotation.getFile());
             } catch (IOException | ClassNotFoundException e) {
                 log.error("Exception while decoding object in response", e);
             } finally {

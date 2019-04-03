@@ -98,9 +98,6 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_PIXELS_DESCRIPTION_EVENT =
             "omero.get_pixels_description";
 
-    public static final String GET_FILE_ANNOTATION_EVENT =
-            "omero.get_file_annotation";
-
     public static final String GET_FILE_PATH_EVENT =
             "omero.get_file_path";
 
@@ -194,13 +191,6 @@ public class BackboneVerticle extends AbstractVerticle {
             GET_PIXELS_DESCRIPTION_EVENT, new Handler<Message<JsonObject>>() {
                 public void handle(Message<JsonObject> event) {
                     getPixelsDescription(event);
-                };
-            }
-        );
-        eventBus.<JsonObject>consumer(
-            GET_FILE_ANNOTATION_EVENT, new Handler<Message<JsonObject>>() {
-                public void handle(Message<JsonObject> event) {
-                    getFileAnnotation(event);
                 };
             }
         );
@@ -426,40 +416,4 @@ public class BackboneVerticle extends AbstractVerticle {
         handleMessageWithJob(job);
     }
 
-    public void getFileAnnotation(Message<JsonObject> message) {
-        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getAnnotations") {
-            @Transactional(readOnly = true)
-            public FileAnnotation doWork(Session session, ServiceFactory sf) {
-                try {
-                    IMetadata iMetadata = sf.getMetadataService();
-                    JsonObject data = this.getMessage().body();
-                    Set<Long> annotationIds = new HashSet<Long>();
-                    annotationIds.add(data.getLong("annotationId"));
-                    Set<Annotation> annotations = iMetadata.loadAnnotation(annotationIds);
-
-                    Iterator<Annotation> j = annotations.iterator();
-                    Annotation annotation;
-                    FileAnnotation fa;
-                    int index = 0;
-                    while (j.hasNext()) {
-                        annotation = j.next();
-                        if (annotation instanceof FileAnnotation && index == 0) {
-                            fa = (FileAnnotation) annotation;
-                            return fa;
-                        }
-                        else {
-                            message.fail(404, "Could not find annotation "
-                                    + data.getLong("annotationId").toString());
-                            index++;
-                        }
-                    }
-                } catch (Exception e) {
-                    log.error("Error retrieving data", e);
-                    message.fail(500, e.getMessage());
-                }
-                return null;
-            }
-        };
-        handleMessageWithJob(job);
-    }
 }
