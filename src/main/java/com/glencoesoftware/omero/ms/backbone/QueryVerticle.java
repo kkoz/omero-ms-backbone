@@ -46,6 +46,7 @@ import io.vertx.ext.web.RoutingContext;
 import io.vertx.spi.cluster.hazelcast.ClusterHealthCheck;
 import ome.model.annotations.FileAnnotation;
 import ome.model.core.Image;
+import ome.model.core.OriginalFile;
 import ome.model.core.Pixels;
 
 
@@ -390,19 +391,35 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("id", fileId);
         data.put("type", "OriginalFile");
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_FILE_PATH_EVENT, data, result -> {
-            String s = "";
+                BackboneVerticle.GET_FILE_PATH_EVENT, data, filePathResult -> {
             try {
-                if (result.failed()) {
-                    ifFailed(response, result);
+                if (filePathResult.failed()) {
+                    ifFailed(response, filePathResult);
                     return;
                 }
-                s = deserialize(result);
-                log.debug("Response ended");
-                String filename = s.split("/")[s.split("/").length - 1];
-                response.headers().set("Content-Type", "application/octet-stream");
-                response.headers().set("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-                response.sendFile(s);
+                final String filepath = deserialize(filePathResult);
+                vertx.eventBus().<byte[]>send(
+                        BackboneVerticle.GET_OBJECT_EVENT, data, getOriginalFileResult -> {
+                    String s = "";
+                    try {
+                        if (getOriginalFileResult.failed()) {
+                            ifFailed(response, getOriginalFileResult);
+                            return;
+                        }
+                        OriginalFile of = deserialize(getOriginalFileResult);
+                        String filename = of.getName();
+                        String mimeType = of.getMimetype();
+                        log.info(filename);
+                        log.info(mimeType);
+                        log.debug("Response ended");
+                        response.headers().set("Content-Type", mimeType);
+                        response.headers().set("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+                        response.sendFile(filepath);
+                    } catch (IOException | ClassNotFoundException e) {
+                        log.error("Exception while decoding object in response", e);
+                        response.end("Error");
+                    }
+                });
             } catch (IOException | ClassNotFoundException e) {
                 log.error("Exception while decoding object in response", e);
                 response.end("Error");
