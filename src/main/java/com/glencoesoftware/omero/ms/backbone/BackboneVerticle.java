@@ -101,9 +101,6 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_FILE_ANNOTATION_EVENT =
             "omero.get_file_annotation";
 
-    public static final String GET_FILE_ANNOTATION_RAW_EVENT =
-            "omero.get_file_annotation_raw";
-
     public static final String GET_FILE_PATH_EVENT =
             "omero.get_file_path";
 
