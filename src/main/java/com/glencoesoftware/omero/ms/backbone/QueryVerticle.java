@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.lang.Integer;
 
@@ -97,6 +98,9 @@ public class QueryVerticle extends AbstractVerticle {
 
         router.get("/api/:sessionKey/getOriginalFile/:fileId")
             .handler(this::getOriginalFile);
+
+        router.get("/api/:sessionKey/getImportedImageFiles/:imageId")
+            .handler(this::getImportedImageFiles);
 
         Handler<Future<Status>> procedure =
                 ClusterHealthCheck.createProcedure(vertx);
@@ -425,6 +429,37 @@ public class QueryVerticle extends AbstractVerticle {
                 response.end("Error");
             } finally {
                 //response.end(s);
+            }
+        });
+    }
+
+    private void getImportedImageFiles(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        Long imageId = Long.parseLong(request.params().get("imageId"));
+        log.debug("Image ID: {}", imageId);
+
+        final JsonObject data = new JsonObject();
+        data.put("sessionKey", sessionKey);
+        data.put("imageId", imageId);
+        vertx.eventBus().<byte[]>send(
+                BackboneVerticle.GET_IMPORTED_IMAGE_FILES, data, result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    ifFailed(response, result);
+                    return;
+                }
+                response.headers().set("Content-Type", "text/plain");
+                List<OriginalFile> originalFiles = deserialize(result);
+                s = String.valueOf(originalFiles.size());
+                log.debug("Response ended");
+            } catch (IOException | ClassNotFoundException e) {
+                log.error("Exception while decoding object in response", e);
+            } finally {
+                response.end(s);
             }
         });
     }
