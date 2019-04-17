@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.lang.Integer;
 
@@ -46,6 +47,7 @@ import io.vertx.ext.web.RoutingContext;
 import io.vertx.spi.cluster.hazelcast.ClusterHealthCheck;
 import ome.model.annotations.FileAnnotation;
 import ome.model.core.Image;
+import ome.model.core.OriginalFile;
 import ome.model.core.Pixels;
 
 
@@ -96,6 +98,9 @@ public class QueryVerticle extends AbstractVerticle {
 
         router.get("/api/:sessionKey/getOriginalFile/:fileId")
             .handler(this::getOriginalFile);
+
+        router.get("/api/:sessionKey/getImportedImageFiles/:imageId")
+            .handler(this::getImportedImageFiles);
 
         Handler<Future<Status>> procedure =
                 ClusterHealthCheck.createProcedure(vertx);
@@ -390,24 +395,71 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("id", fileId);
         data.put("type", "OriginalFile");
         vertx.eventBus().<byte[]>send(
-                BackboneVerticle.GET_FILE_PATH_EVENT, data, result -> {
+                BackboneVerticle.GET_FILE_PATH_EVENT, data, filePathResult -> {
+            try {
+                if (filePathResult.failed()) {
+                    ifFailed(response, filePathResult);
+                    return;
+                }
+                final String filepath = deserialize(filePathResult);
+                vertx.eventBus().<byte[]>send(
+                        BackboneVerticle.GET_OBJECT_EVENT, data, getOriginalFileResult -> {
+                    String s = "";
+                    try {
+                        if (getOriginalFileResult.failed()) {
+                            ifFailed(response, getOriginalFileResult);
+                            return;
+                        }
+                        OriginalFile of = deserialize(getOriginalFileResult);
+                        String filename = of.getName();
+                        String mimeType = of.getMimetype();
+                        log.info(filename);
+                        log.info(mimeType);
+                        log.debug("Response ended");
+                        response.headers().set("Content-Type", mimeType);
+                        response.headers().set("Content-Disposition", "attachment; filename=\"" + filename + "\"");
+                        response.sendFile(filepath);
+                    } catch (IOException | ClassNotFoundException e) {
+                        log.error("Exception while decoding object in response", e);
+                        response.end("Error");
+                    }
+                });
+            } catch (IOException | ClassNotFoundException e) {
+                log.error("Exception while decoding object in response", e);
+                response.end("Error");
+            } finally {
+                //response.end(s);
+            }
+        });
+    }
+
+    private void getImportedImageFiles(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        Long imageId = Long.parseLong(request.params().get("imageId"));
+        log.debug("Image ID: {}", imageId);
+
+        final JsonObject data = new JsonObject();
+        data.put("sessionKey", sessionKey);
+        data.put("imageId", imageId);
+        vertx.eventBus().<byte[]>send(
+                BackboneVerticle.GET_IMPORTED_IMAGE_FILES, data, result -> {
             String s = "";
             try {
                 if (result.failed()) {
                     ifFailed(response, result);
                     return;
                 }
-                s = deserialize(result);
+                response.headers().set("Content-Type", "text/plain");
+                List<OriginalFile> originalFiles = deserialize(result);
+                s = String.valueOf(originalFiles.size());
                 log.debug("Response ended");
-                String filename = s.split("/")[s.split("/").length - 1];
-                response.headers().set("Content-Type", "application/octet-stream");
-                response.headers().set("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-                response.sendFile(s);
             } catch (IOException | ClassNotFoundException e) {
                 log.error("Exception while decoding object in response", e);
-                response.end("Error");
             } finally {
-                //response.end(s);
+                response.end(s);
             }
         });
     }
