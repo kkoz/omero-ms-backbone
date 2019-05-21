@@ -126,6 +126,8 @@ public class BackboneVerticle extends AbstractVerticle {
     /** Original file service for getting paths from the main repository */
     private final OriginalFilesService originalFilesService;
 
+    private String managedRepositoryRoot;
+
     public BackboneVerticle(Executor executor,
             SessionManager sessionManager,
             SqlAction sqlAction,
@@ -137,6 +139,17 @@ public class BackboneVerticle extends AbstractVerticle {
         this.sqlAction = sqlAction;
         this.originalFilesService = originalFilesService;
         this.managedRepository = managedRepository;
+
+        try {
+            omero.model.OriginalFile description =
+                    managedRepository.getDescription();
+            managedRepositoryRoot = description.getPath().getValue() +
+                    description.getName().getValue();
+        } catch (ServerError e) {
+            log.error("Error retrieving managed repository description", e);
+            this.managedRepositoryRoot = null;
+        }
+
 
         // File path restriction creation cribbed from PublicRepositoryI
         // constructor
@@ -446,13 +459,13 @@ public class BackboneVerticle extends AbstractVerticle {
     private void getOriginalFilePaths(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getOriginalFilePaths") {
             @Transactional(readOnly = true)
-            public List<String> doWork(Session session, ServiceFactory sf) {
+            public String doWork(Session session, ServiceFactory sf) {
                 try {
                     JsonObject data = this.getMessage().body();
                     IQuery iQuery = sf.getQueryService();
                     JsonArray fileIds = data.getJsonArray("originalFileIds");
                     Iterator<Object> iter = fileIds.iterator();
-                    List<String> paths = new ArrayList<String>(fileIds.size());
+                    JsonArray paths = new JsonArray();
                     while (iter.hasNext()) {
                         Long id = new Long(((Integer) iter.next()).toString());
                         OriginalFile of = iQuery.get(OriginalFile.class, id);
@@ -470,7 +483,10 @@ public class BackboneVerticle extends AbstractVerticle {
                             paths.add(path);
                         }
                     }
-                    return paths;
+                    JsonObject responseObj = new JsonObject();
+                    responseObj.put("managedRepositoryRoot", managedRepositoryRoot);
+                    responseObj.put("paths", paths);
+                    return responseObj.toString();
                 } catch (Exception e) {
                     log.error("Error retrieving data", e);
                     message.fail(500, e.getMessage());
@@ -484,18 +500,12 @@ public class BackboneVerticle extends AbstractVerticle {
     private String getOriginalFilePath(OriginalFile of) throws ServerError {
         FsFile fsFile = new FsFile(sqlAction.findRepoFilePath(
                 of.getRepo(), of.getId()));
-        // (1) Get the repository root from the managed
-        //     repository description like in client code
-        omero.model.OriginalFile description =
-                managedRepository.getDescription();
-        String root = description.getPath().getValue() +
-                      description.getName().getValue();
-        // (2) Create a FileMaker like in the LegacyRepositoryI
+        // (1) Create a FileMaker like in the LegacyRepositoryI
         //     constructors which directly initialize the
         //     ManagedRepositoryI servant (a subclass of
         //     PublicRepositoryI) with this instance
-        FileMaker fileMaker = new FileMaker(root);
-        // (3) Prepare a file path transformer as in
+        FileMaker fileMaker = new FileMaker(managedRepositoryRoot);
+        // (2) Prepare a file path transformer as in
         //     PublicRepositoryI#initialize() used by
         //     PublicRepository#checkId() and by extension
         //     the CheckedPath constructor which is the final
