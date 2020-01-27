@@ -24,14 +24,13 @@ import java.io.ObjectInputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.lang.Integer;
 
 import org.slf4j.LoggerFactory;
 
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
-import io.vertx.core.Future;
 import io.vertx.core.Handler;
+import io.vertx.core.Promise;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.eventbus.ReplyException;
 import io.vertx.core.http.HttpServer;
@@ -66,7 +65,7 @@ public class QueryVerticle extends AbstractVerticle {
      * @param args Command line arguments.
      */
     @Override
-    public void start(Future<Void> future) {
+    public void start(Promise<Void> promise) {
         log.info("Starting verticle");
         HttpServer server = vertx.createHttpServer();
         Router router = Router.router(vertx);
@@ -102,20 +101,20 @@ public class QueryVerticle extends AbstractVerticle {
         router.get("/api/:sessionKey/getImportedImageFiles/:imageId")
             .handler(this::getImportedImageFiles);
 
-        Handler<Future<Status>> procedure =
+        Handler<Promise<Status>> procedure =
                 ClusterHealthCheck.createProcedure(vertx);
         HealthChecks checks =
                 HealthChecks.create(vertx).register("cluster-health", procedure);
         router.get("/readiness")
             .handler(HealthCheckHandler.createWithHealthChecks(checks));
 
-        int port = 9090;  // FIXME
+        int port = 9191;  // FIXME
         log.info("Starting HTTP server *:{}", port);
-        server.requestHandler(router::accept).listen(port, result -> {
+        server.requestHandler(router).listen(port, result -> {
             if (result.succeeded()) {
-                future.complete();
+                promise.complete();
             } else {
-                future.fail(result.cause());
+                promise.fail(result.cause());
             }
         });
     }
@@ -147,7 +146,7 @@ public class QueryVerticle extends AbstractVerticle {
 
         final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
-        vertx.eventBus().<Boolean>send(
+        vertx.eventBus().<Boolean>request(
                 BackboneVerticle.IS_SESSION_VALID_EVENT, data, result -> {
             String s = "";
             try {
@@ -177,7 +176,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("type", type);
         data.put("id", id);
-        vertx.eventBus().<Boolean>send(
+        vertx.eventBus().<Boolean>request(
                 BackboneVerticle.CAN_READ_EVENT, data, result -> {
             String s = "";
             try {
@@ -207,7 +206,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("type", type);
         data.put("id", id);
-        vertx.eventBus().<byte[]>send(
+        vertx.eventBus().<byte[]>request(
                 BackboneVerticle.GET_OBJECT_EVENT, data, result -> {
             String s = "";
             try {
@@ -237,7 +236,7 @@ public class QueryVerticle extends AbstractVerticle {
         final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
         data.put("type", type);
-        vertx.eventBus().<byte[]>send(
+        vertx.eventBus().<byte[]>request(
                 BackboneVerticle.GET_ALL_ENUMERATIONS_EVENT, data, result -> {
             String s = "";
             try {
@@ -267,7 +266,7 @@ public class QueryVerticle extends AbstractVerticle {
         final Map<String, Object> data = new HashMap<String, Object>();
         data.put("sessionKey", sessionKey);
         data.put("pixelsId", pixelsId);
-        vertx.eventBus().<byte[]>send(
+        vertx.eventBus().<byte[]>request(
                 BackboneVerticle.GET_RENDERING_SETTINGS_EVENT,
                 Json.encode(data), result -> {
             String s = "";
@@ -298,7 +297,7 @@ public class QueryVerticle extends AbstractVerticle {
         final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
         data.put("imageId", imageId);
-        vertx.eventBus().<byte[]>send(
+        vertx.eventBus().<byte[]>request(
                 BackboneVerticle.GET_PIXELS_DESCRIPTION_EVENT, data, result -> {
             String s = "";
             try {
@@ -332,7 +331,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("id", annotationId);
         data.put("type", "FileAnnotation");
-        vertx.eventBus().<byte[]>send(
+        vertx.eventBus().<byte[]>request(
                 BackboneVerticle.GET_FILE_PATH_EVENT, data, result -> {
             String s = "";
             try {
@@ -363,7 +362,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("id", fileId);
         data.put("type", "OriginalFile");
-        vertx.eventBus().<byte[]>send(
+        vertx.eventBus().<byte[]>request(
                 BackboneVerticle.GET_FILE_PATH_EVENT, data, result -> {
             String s = "";
             try {
@@ -394,7 +393,7 @@ public class QueryVerticle extends AbstractVerticle {
         data.put("sessionKey", sessionKey);
         data.put("id", fileId);
         data.put("type", "OriginalFile");
-        vertx.eventBus().<byte[]>send(
+        vertx.eventBus().<byte[]>request(
                 BackboneVerticle.GET_FILE_PATH_EVENT, data, filePathResult -> {
             try {
                 if (filePathResult.failed()) {
@@ -402,7 +401,7 @@ public class QueryVerticle extends AbstractVerticle {
                     return;
                 }
                 final String filepath = deserialize(filePathResult);
-                vertx.eventBus().<byte[]>send(
+                vertx.eventBus().<byte[]>request(
                         BackboneVerticle.GET_OBJECT_EVENT, data, getOriginalFileResult -> {
                     String s = "";
                     try {
@@ -444,7 +443,7 @@ public class QueryVerticle extends AbstractVerticle {
         final JsonObject data = new JsonObject();
         data.put("sessionKey", sessionKey);
         data.put("imageId", imageId);
-        vertx.eventBus().<byte[]>send(
+        vertx.eventBus().<byte[]>request(
                 BackboneVerticle.GET_IMPORTED_IMAGE_FILES, data, result -> {
             String s = "";
             try {

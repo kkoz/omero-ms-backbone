@@ -15,6 +15,9 @@
     <constructor-arg ref="omero-ms-backbone-verticlefactory"/>
   </bean>
 
+  <bean id="prometheusSpanHandler"
+        class="com.glencoesoftware.omero.ms.backbone.PrometheusSpanHandler"/>
+
   <bean id="omero-ms-backbone-verticle"
         class="com.glencoesoftware.omero.ms.backbone.BackboneVerticle"
         singleton="false">
@@ -24,6 +27,7 @@
     <constructor-arg ref="/OMERO/Files"/>
     <constructor-arg ref="managedRepository"/>
     <constructor-arg value="${omero.fs.repo.path_rules}"/>
+    <constructor-arg ref="prometheusSpanHandler"/>
   </bean>
 
 </beans>

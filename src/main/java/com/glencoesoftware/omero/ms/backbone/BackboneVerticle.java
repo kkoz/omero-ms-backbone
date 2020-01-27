@@ -32,8 +32,21 @@ import org.hibernate.Session;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 
+import brave.Tracing;
+import brave.handler.FinishedSpanHandler;
+import brave.Tracer.SpanInScope;
+import brave.http.HttpTracing;
+import brave.propagation.Propagation.Getter;
+import brave.propagation.Propagation.Setter;
+import brave.propagation.TraceContext.Extractor;
+import brave.propagation.TraceContext.Injector;
+import brave.propagation.TraceContextOrSamplingFlags;
+import brave.sampler.Sampler;
 import io.vertx.core.AbstractVerticle;
+import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
+import io.vertx.core.Promise;
+import io.vertx.core.eventbus.DeliveryContext;
 import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonArray;
@@ -59,6 +72,9 @@ import ome.system.ServiceFactory;
 import ome.util.SqlAction;
 import omero.ServerError;
 import omero.util.IceMapper;
+import zipkin2.Span;
+import zipkin2.reporter.AsyncReporter;
+import zipkin2.reporter.okhttp3.OkHttpSender;
 import ome.services.blitz.repo.FileMaker;
 import ome.services.blitz.repo.LegacyRepositoryI;
 import ome.services.blitz.repo.path.FilePathRestrictionInstance;
@@ -101,6 +117,9 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_PIXELS_DESCRIPTION_EVENT =
             "omero.get_pixels_description";
 
+    public static final String GET_PIXELS_EVENT =
+            "omero.get_pixels";
+
     public static final String GET_FILE_PATH_EVENT =
             "omero.get_file_path";
 
@@ -128,17 +147,30 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private String managedRepositoryRoot;
 
+    /** Zipkin HTTP Tracing*/
+    private HttpTracing httpTracing;
+
+    private OkHttpSender sender;
+    private AsyncReporter<Span> spanReporter;
+
+    private Tracing tracing;
+
+    private FinishedSpanHandler finishedSpanHandler;
+
+
     public BackboneVerticle(Executor executor,
             SessionManager sessionManager,
             SqlAction sqlAction,
             OriginalFilesService originalFilesService,
             LegacyRepositoryI managedRepository,
-            String pathRules) {
+            String pathRules,
+            FinishedSpanHandler finishedSpanHandler) {
         this.executor = executor;
         this.sessionManager = sessionManager;
         this.sqlAction = sqlAction;
         this.originalFilesService = originalFilesService;
         this.managedRepository = managedRepository;
+        this.finishedSpanHandler = finishedSpanHandler;
 
         try {
             omero.model.OriginalFile description =
@@ -172,17 +204,82 @@ public class BackboneVerticle extends AbstractVerticle {
 
     @Override
     public void start() {
+
+        String zipkinUrl = "http://localhost:9411/api/v2/spans";
+        log.info("Tracing enabled: {}", zipkinUrl);
+        sender = OkHttpSender.create(zipkinUrl);
+        spanReporter = AsyncReporter.create(sender);
+        //PrometheusSpanHandler prometheusSpanHandler = new PrometheusSpanHandler();
+        tracing = Tracing.newBuilder()
+            .sampler(Sampler.ALWAYS_SAMPLE)
+            .localServiceName("omero-ms-backbone")
+            .addFinishedSpanHandler(finishedSpanHandler)
+            .spanReporter(spanReporter)
+            .build();
+        httpTracing = HttpTracing.newBuilder(tracing).build();
+
         EventBus eventBus = vertx.eventBus();
+
+        Extractor<DeliveryContext<JsonObject>> extractor = Tracing.current().propagation().extractor(
+            new Getter<DeliveryContext<JsonObject>, String>() {
+                @Override
+                public String get(DeliveryContext<JsonObject> carrier, String key) {
+                    return carrier.message().headers().get(key);
+                }
+            }
+        );
+
+        Injector<DeliveryContext<JsonObject>> injector = Tracing.current().propagation().injector(
+            new Setter<DeliveryContext<JsonObject>, String>() {
+                @Override
+                public void put(DeliveryContext<JsonObject> carrier, String key, String value) {
+                    carrier.message().headers().add(key, value);
+                }
+            });
+
+        eventBus.addInboundInterceptor(new Handler<DeliveryContext<JsonObject>>() {
+            @Override
+            public void handle(DeliveryContext<JsonObject> event) {
+                log.info("In the Inbound Interceptor");
+                TraceContextOrSamplingFlags extracted = extractor.extract(event);
+                brave.Span span =  tracing.currentTracer().nextSpan(extracted);
+                span.name("backbone");
+                try (SpanInScope ws = tracing.currentTracer().withSpanInScope(span)) {
+                    span.start();
+                    injector.inject(span.context(), event);
+                    log.info(event.message().headers().names().toString());
+                    event.next();
+                }
+            };
+        });
+        eventBus.addOutboundInterceptor(new Handler<DeliveryContext<JsonObject>>() {
+            @Override
+            public void handle(DeliveryContext<JsonObject> event) {
+                log.info("In the Outbound Interceptor");
+                log.info(event.message().headers().names().toString());
+                TraceContextOrSamplingFlags extracted = extractor.extract(event);
+                if(extracted.context() != null) {
+                    log.info("Submitting the trace");
+                    brave.Span span =  tracing.currentTracer().joinSpan(extracted.context());
+                    span.finish();
+                }
+                event.next();
+            };
+        });
 
         eventBus.<JsonObject>consumer(
             IS_SESSION_VALID_EVENT, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
+                    log.info("In IS_SESSION_VALID_EVENT");
+                    log.info(event.headers().names().toString());
                     isSessionValid(event);
                 };
             }
         );
         eventBus.<JsonObject>consumer(
             CAN_READ_EVENT, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
                     canRead(event);
                 };
@@ -190,6 +287,7 @@ public class BackboneVerticle extends AbstractVerticle {
         );
         eventBus.<JsonObject>consumer(
             GET_OBJECT_EVENT, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
                     getObject(event);
                 };
@@ -197,6 +295,7 @@ public class BackboneVerticle extends AbstractVerticle {
         );
         eventBus.<JsonObject>consumer(
             GET_ALL_ENUMERATIONS_EVENT, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
                     getAllEnumerations(event);
                 };
@@ -204,6 +303,7 @@ public class BackboneVerticle extends AbstractVerticle {
         );
         eventBus.<JsonObject>consumer(
             GET_RENDERING_SETTINGS_EVENT, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
                     getRenderingSettings(event);
                 };
@@ -211,13 +311,23 @@ public class BackboneVerticle extends AbstractVerticle {
         );
         eventBus.<JsonObject>consumer(
             GET_PIXELS_DESCRIPTION_EVENT, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
                     getPixelsDescription(event);
                 };
             }
         );
         eventBus.<JsonObject>consumer(
+                GET_PIXELS_EVENT, new Handler<Message<JsonObject>>() {
+                    @Override
+                    public void handle(Message<JsonObject> event) {
+                        getPixels(event);
+                    };
+                }
+        );
+        eventBus.<JsonObject>consumer(
             GET_FILE_PATH_EVENT, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
                     getFilePath(event);
                 };
@@ -225,6 +335,7 @@ public class BackboneVerticle extends AbstractVerticle {
         );
         eventBus.<JsonObject>consumer(
             GET_ORIGINAL_FILE_PATHS_EVENT, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
                     getOriginalFilePaths(event);
                 };
@@ -232,6 +343,7 @@ public class BackboneVerticle extends AbstractVerticle {
         );
         eventBus.<JsonObject>consumer(
             GET_IMPORTED_IMAGE_FILES, new Handler<Message<JsonObject>>() {
+                @Override
                 public void handle(Message<JsonObject> event) {
                     getImportedImageFiles(event);
                 };
@@ -283,6 +395,7 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void canRead(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "canRead") {
+            @Override
             @Transactional(readOnly = true)
             public Boolean doWork(Session session, ServiceFactory sf) {
                 try {
@@ -305,6 +418,7 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void getObject(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getObject") {
+            @Override
             @Transactional(readOnly = true)
             public IObject doWork(Session session, ServiceFactory sf) {
                 try {
@@ -326,6 +440,7 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void getAllEnumerations(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getAllEnumerations") {
+            @Override
             @Transactional(readOnly = true)
             public List<? extends IObject> doWork(Session session, ServiceFactory sf) {
                 try {
@@ -346,6 +461,7 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void getRenderingSettings(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getRenderingSettings") {
+            @Override
             @Transactional(readOnly = true)
             public RenderingDef doWork(Session session, ServiceFactory sf) {
                 try {
@@ -365,6 +481,37 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void getPixelsDescription(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getPixelsDescription") {
+            @Override
+            @Transactional(readOnly = true)
+            public Pixels doWork(Session session, ServiceFactory sf) {
+                try {
+                    IQuery iQuery = sf.getQueryService();
+                    IPixels iPixels = sf.getPixelsService();
+                    JsonObject data = this.getMessage().body();
+                    Parameters parameters = new Parameters();
+                    parameters.addId(data.getLong("imageId"));
+                    Image image = iQuery.findByQuery(
+                            "SELECT i FROM Image as i " +
+                            "JOIN FETCH i.pixels " +
+                            "WHERE i.id = :id",
+                            parameters);
+                    Pixels pixels = iPixels.retrievePixDescription(
+                            image.getPrimaryPixels().getId());
+                    pixels.setImage(image);
+                    return pixels;
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(job);
+    }
+
+    private void getPixels(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getPixels") {
+            @Override
             @Transactional(readOnly = true)
             public Pixels doWork(Session session, ServiceFactory sf) {
                 try {
@@ -394,6 +541,7 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void getImportedImageFiles(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getFileset") {
+            @Override
             @Transactional(readOnly = true)
             public List<OriginalFile> doWork(Session session, ServiceFactory sf) {
                 try {
@@ -421,6 +569,7 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void getFilePath(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getFilePath") {
+            @Override
             @Transactional(readOnly = true)
             public String doWork(Session session, ServiceFactory sf) {
                 try {
@@ -458,6 +607,7 @@ public class BackboneVerticle extends AbstractVerticle {
 
     private void getOriginalFilePaths(Message<JsonObject> message) {
         BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getOriginalFilePaths") {
+            @Override
             @Transactional(readOnly = true)
             public String doWork(Session session, ServiceFactory sf) {
                 try {
