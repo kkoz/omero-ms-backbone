@@ -110,6 +110,9 @@ public class BackboneVerticle extends AbstractVerticle {
     public static final String GET_IMPORTED_IMAGE_FILES =
             "omero.get_imported_image_files";
 
+    public static final String GET_IMAGES =
+            "omero.get_images";
+
     private final Executor executor;
 
     private final SessionManager sessionManager;
@@ -234,6 +237,13 @@ public class BackboneVerticle extends AbstractVerticle {
             GET_IMPORTED_IMAGE_FILES, new Handler<Message<JsonObject>>() {
                 public void handle(Message<JsonObject> event) {
                     getImportedImageFiles(event);
+                };
+            }
+        );
+        eventBus.<JsonObject>consumer(
+            GET_IMAGES, new Handler<Message<JsonObject>>() {
+                public void handle(Message<JsonObject> event) {
+                    getImages(event);
                 };
             }
         );
@@ -382,6 +392,37 @@ public class BackboneVerticle extends AbstractVerticle {
                             image.getPrimaryPixels().getId());
                     pixels.setImage(image);
                     return pixels;
+                } catch (Exception e) {
+                    log.error("Error retrieving data", e);
+                    message.fail(500, e.getMessage());
+                }
+                return null;
+            }
+        };
+        handleMessageWithJob(job);
+    }
+
+    private void getImages(Message<JsonObject> message) {
+        BackboneSimpleWork job = new BackboneSimpleWork(message, this, "getPixelsDescription") {
+            @Override
+            @Transactional(readOnly = true)
+            public List<Image> doWork(Session session, ServiceFactory sf) {
+                try {
+                    IQuery iQuery = sf.getQueryService();
+                    JsonObject data = this.getMessage().body();
+                    Parameters parameters = new Parameters();
+                    JsonArray imageIds = data.getJsonArray("imageIds");
+                    List<Long> ids = new ArrayList<Long>();
+                    for(int i = 0; i <imageIds.size(); i++) {
+                        ids.add(imageIds.getLong(i));
+                    }
+                    parameters.addIds(ids);
+                    List<Image> images = iQuery.findAllByQuery(
+                            "SELECT i FROM Image as i " +
+                            "JOIN FETCH i.pixels " +
+                            "WHERE i.id in (:ids)",
+                            parameters);
+                    return images;
                 } catch (Exception e) {
                     log.error("Error retrieving data", e);
                     message.fail(500, e.getMessage());

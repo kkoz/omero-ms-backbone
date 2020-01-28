@@ -38,6 +38,7 @@ import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.Json;
+import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.healthchecks.HealthCheckHandler;
 import io.vertx.ext.healthchecks.HealthChecks;
@@ -101,6 +102,9 @@ public class QueryVerticle extends AbstractVerticle {
 
         router.get("/api/:sessionKey/getImportedImageFiles/:imageId")
             .handler(this::getImportedImageFiles);
+
+        router.get("/api/:sessionKey/getImages/:imageId")
+            .handler(this::getImages);
 
         Handler<Future<Status>> procedure =
                 ClusterHealthCheck.createProcedure(vertx);
@@ -460,6 +464,39 @@ public class QueryVerticle extends AbstractVerticle {
                 log.error("Exception while decoding object in response", e);
             } finally {
                 response.end(s);
+            }
+        });
+    }
+
+    private void getImages(RoutingContext event) {
+        final HttpServerRequest request = event.request();
+        final HttpServerResponse response = event.response();
+        String sessionKey = request.params().get("sessionKey");
+        log.debug("Session key: " + sessionKey);
+        Long imageId = Long.parseLong(request.params().get("imageId"));
+        log.debug("Image ID: {}", imageId);
+        final JsonObject data = new JsonObject();
+        final JsonArray imageIds = new JsonArray().add(imageId);
+        data.put("sessionKey", sessionKey);
+        data.put("imageIds", imageIds);
+        vertx.eventBus().<byte[]>send(
+                BackboneVerticle.GET_IMAGES, data, result -> {
+            String s = "";
+            try {
+                if (result.failed()) {
+                    ifFailed(response, result);
+                    return;
+                }
+                response.headers().set("Content-Type", "text/plain");
+                List<Image> images = deserialize(result);
+                Image image = images.get(0);
+                s = String.format(
+                        "%s;Series:%s", image, image.getSeries());
+            } catch (IOException | ClassNotFoundException e) {
+                log.error("Exception while decoding object in response", e);
+            } finally {
+                response.end(s);
+                log.debug("Response ended");
             }
         });
     }
